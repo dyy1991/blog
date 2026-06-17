@@ -1,0 +1,43 @@
+services:
+  app:
+    # 镜像由 GitHub Actions 构建后推送到 GHCR，服务器直接拉取
+    image: ghcr.io/${GITHUB_USER}/${GITHUB_REPO}:latest
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://bloguser:${DB_PASSWORD}@db:5432/myblog
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: myblog
+      POSTGRES_USER: bloguser
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bloguser -d myblog"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro   # HTTPS 证书（后续配置）
+    depends_on:
+      - app
+
+volumes:
+  postgres_data:
