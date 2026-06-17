@@ -64,13 +64,16 @@ jobs:
 
     steps:
       - name: Setup SSH key
+        env:
+          SSH_KEY_B64: ${{ secrets.SERVER_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          # Base64 解码写入文件，彻底避免换行符问题
-          echo "${{ secrets.SERVER_SSH_KEY }}" | base64 -d > ~/.ssh/deploy_key
+          echo "$SSH_KEY_B64" | base64 -d > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          # 预先信任服务器，跳过 known_hosts 交互确认
           ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+          # 打印密钥指纹（不暴露私钥内容）
+          echo "=== Key fingerprint in CI ==="
+          ssh-keygen -l -f ~/.ssh/deploy_key
 
       - name: Deploy via SSH
         run: |
