@@ -63,33 +63,36 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          # 用 printf 写入，避免 Windows 换行符问题
+          printf '%s' "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # 预先信任服务器，跳过 known_hosts 交互确认
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.SERVER_HOST }}        # 39.107.123.58
-          username: ${{ secrets.SERVER_USER }}    # root 或 deploy
-          key: ${{ secrets.SERVER_SSH_KEY }}      # 私钥内容
-          script: |
-            set -e   # 任何命令失败则中止
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
+            set -e
 
             cd /var/www/myblog
 
-            # 更新环境变量（写入 .env）
+            # 写入环境变量
             echo "GITHUB_USER=${{ github.repository_owner }}" > .env
-            echo "GITHUB_REPO=$(echo ${{ github.repository }} | cut -d'/' -f2)" >> .env
-            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+            echo "GITHUB_REPO=$(echo "${{ github.repository }}" | cut -d'/' -f2)" >> .env
 
             # 登录 GHCR 拉取新镜像
-            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-            # 拉取最新镜像并重启服务
+            # 拉取最新镜像并重启
             docker compose pull app
             docker compose up -d --remove-orphans
-
-            # 清理旧镜像，节省磁盘
             docker image prune -f
 
             echo "✅ Deployment complete"
+          EOF
 
   # ── Job 3: 部署后健康检查 ──
   healthcheck:
