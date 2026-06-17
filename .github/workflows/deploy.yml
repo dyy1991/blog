@@ -75,25 +75,30 @@ jobs:
           echo "=== Key fingerprint in CI ==="
           ssh-keygen -l -f ~/.ssh/deploy_key
 
+      - name: Test SSH connection (debug)
+        run: |
+          ssh -v \
+              -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              -o PasswordAuthentication=no \
+              ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} \
+              'echo SSH_OK' 2>&1 || true
+
       - name: Deploy via SSH
         run: |
-          ssh -i ~/.ssh/deploy_key ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=no \
+              -o PasswordAuthentication=no \
+              ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} \
+              bash << 'EOF'
             set -e
-
             cd /var/www/myblog
-
-            # 写入环境变量
             echo "GITHUB_USER=${{ github.repository_owner }}" > .env
             echo "GITHUB_REPO=$(echo "${{ github.repository }}" | cut -d'/' -f2)" >> .env
-
-            # 登录 GHCR 拉取新镜像
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
-            # 拉取最新镜像并重启
             docker compose pull app
             docker compose up -d --remove-orphans
             docker image prune -f
-
             echo "✅ Deployment complete"
           EOF
 
