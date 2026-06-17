@@ -114,7 +114,7 @@ jobs:
 
       - name: Check HTTP response
         run: |
-          STATUS=$(curl -o /dev/null -s -w "%{http_code}" http://${{ secrets.SERVER_HOST }})
+          STATUS=$(curl -o /dev/null -s -w "%{http_code}" http://${{ secrets.SERVER_HOST }}:8080)
           echo "HTTP status: $STATUS"
           if [ "$STATUS" != "200" ]; then
             echo "❌ Health check failed! Status: $STATUS"
