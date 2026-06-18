@@ -19,7 +19,6 @@ RUN apk add --no-cache openssl
 
 ENV NODE_ENV=production
 ENV DATABASE_URL="file:/data/support.db"
-# 绕过 Prisma OpenSSL 版本自动检测，直接指定 Alpine(musl+openssl3) 二进制
 ENV PRISMA_QUERY_ENGINE_LIBRARY=/app/node_modules/.prisma/client/libquery_engine-linux-musl-openssl-3.0.x.so.node
 
 # Next.js standalone 模式输出
@@ -27,11 +26,10 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
-# Prisma 运行时文件（standalone 模式不会自动包含）
-COPY --from=builder /app/node_modules/.prisma          ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma/client   ./node_modules/@prisma/client
-COPY --from=builder /app/node_modules/@prisma/engines  ./node_modules/@prisma/engines
-COPY --from=builder /app/node_modules/prisma           ./node_modules/prisma
+# Prisma 运行时文件（standalone 不自动包含；一次性复制整个 @prisma scope）
+COPY --from=builder /app/node_modules/.prisma   ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma   ./node_modules/@prisma
+COPY --from=builder /app/node_modules/prisma    ./node_modules/prisma
 
 # 迁移 schema 文件（db push 需要）
 COPY --from=builder /app/prisma ./prisma
