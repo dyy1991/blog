@@ -1,12 +1,14 @@
 services:
   app:
-    # 镜像由 GitHub Actions 构建后推送到 GHCR，服务器直接拉取
     image: ghcr.io/${GITHUB_USER}/${GITHUB_REPO}:latest
     restart: unless-stopped
     expose:
       - "3000"
     environment:
       - NODE_ENV=production
+      - DATABASE_URL=file:/data/support.db
+    volumes:
+      - support_data:/data   # SQLite 数据库持久化
 
   nginx:
     image: nginx:alpine
@@ -18,12 +20,5 @@ services:
     depends_on:
       - app
 
-# 数据库（后续博客/项目管理功能需要时再开启）
-# db:
-#   image: postgres:16-alpine
-#   environment:
-#     POSTGRES_DB: myblog
-#     POSTGRES_USER: bloguser
-#     POSTGRES_PASSWORD: ${DB_PASSWORD}
-#   volumes:
-#     - postgres_data:/var/lib/postgresql/data
+volumes:
+  support_data:             # 命名 volume，docker-compose down 不会删除

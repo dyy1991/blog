@@ -1,0 +1,74 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ── Prompt 模板库 ──────────────────────────────────────────
+model Template {
+  id           String   @id @default(cuid())
+  title        String
+  category     String   @default("general")
+  roleText     String   @default("")
+  taskTemplate String
+  formatText   String   @default("")
+  guardText    String   @default("")
+  // JSON string: [{key:string, label:string, placeholder:string}]
+  params       String   @default("[]")
+  usageCount   Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// ── Checklist 模板集 ────────────────────────────────────────
+model ChecklistSet {
+  id        String         @id @default(cuid())
+  title     String
+  category  String         @default("general")
+  // JSON string: [{id:string, text:string, required:boolean}]
+  items     String         @default("[]")
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  runs      ChecklistRun[]
+}
+
+// ── Checklist 运行记录 ──────────────────────────────────────
+model ChecklistRun {
+  id             String       @id @default(cuid())
+  checklistSetId String
+  checklistSet   ChecklistSet @relation(fields: [checklistSetId], references: [id], onDelete: Cascade)
+  // JSON string: {itemId: boolean}
+  checkedItems   String       @default("{}")
+  note           String       @default("")
+  createdAt      DateTime     @default(now())
+}
+
+// ── 知识库：坑位记录 ────────────────────────────────────────
+model KnowledgePitfall {
+  id                String   @id @default(cuid())
+  scenario          String
+  symptom           String
+  triggerCondition  String   @default("")
+  suggestion        String
+  tags              String   @default("") // 逗号分隔
+  relatedTemplateId String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+// ── 知识库：复用案例 ────────────────────────────────────────
+model KnowledgeCase {
+  id                String   @id @default(cuid())
+  title             String
+  scenario          String
+  promptFullText    String
+  outputSummary     String   @default("")
+  relatedTemplateId String?
+  tags              String   @default("")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
