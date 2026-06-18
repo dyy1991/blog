@@ -3,6 +3,13 @@ import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
 
+type Row = Record<string, unknown>
+
+function filterNew(existing: { id: string }[], rows: Row[]): Row[] {
+  const ids = new Set(existing.map(e => e.id))
+  return rows.filter(r => !ids.has(r.id as string))
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -12,103 +19,112 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '无效的备份文件格式' }, { status: 400 })
     }
 
-    const results = {
-      templates: 0,
-      checklistSets: 0,
-      checklistRuns: 0,
-      pitfalls: 0,
-      cases: 0,
-    }
+    const results = { templates: 0, checklistSets: 0, checklistRuns: 0, pitfalls: 0, cases: 0 }
 
     // 1. Templates
     if (Array.isArray(templates) && templates.length > 0) {
-      const r = await prisma.template.createMany({
-        data: templates.map((t: Record<string, unknown>) => ({
-          id: t.id as string,
-          title: t.title as string,
-          category: (t.category ?? 'general') as string,
-          roleText: (t.roleText ?? '') as string,
-          taskTemplate: (t.taskTemplate ?? '') as string,
-          formatText: (t.formatText ?? '') as string,
-          guardText: (t.guardText ?? '') as string,
-          params: (t.params ?? '[]') as string,
-          usageCount: (t.usageCount ?? 0) as number,
-          createdAt: new Date(t.createdAt as string),
-          updatedAt: new Date(t.updatedAt as string),
-        })),
-        skipDuplicates: true,
-      })
-      results.templates = r.count
+      const existing = await prisma.template.findMany({ select: { id: true } })
+      const rows = filterNew(existing, templates as Row[])
+      if (rows.length > 0) {
+        const r = await prisma.template.createMany({
+          data: rows.map(t => ({
+            id: t.id as string,
+            title: t.title as string,
+            category: (t.category ?? 'general') as string,
+            roleText: (t.roleText ?? '') as string,
+            taskTemplate: (t.taskTemplate ?? '') as string,
+            formatText: (t.formatText ?? '') as string,
+            guardText: (t.guardText ?? '') as string,
+            params: (t.params ?? '[]') as string,
+            usageCount: (t.usageCount ?? 0) as number,
+            createdAt: new Date(t.createdAt as string),
+            updatedAt: new Date(t.updatedAt as string),
+          })),
+        })
+        results.templates = r.count
+      }
     }
 
-    // 2. ChecklistSets (strip embedded runs / _count before insert)
+    // 2. ChecklistSets
     if (Array.isArray(checklistSets) && checklistSets.length > 0) {
-      const r = await prisma.checklistSet.createMany({
-        data: checklistSets.map((s: Record<string, unknown>) => ({
-          id: s.id as string,
-          title: s.title as string,
-          category: (s.category ?? 'general') as string,
-          items: (s.items ?? '[]') as string,
-          relatedTemplateId: (s.relatedTemplateId ?? null) as string | null,
-          createdAt: new Date(s.createdAt as string),
-          updatedAt: new Date(s.updatedAt as string),
-        })),
-        skipDuplicates: true,
-      })
-      results.checklistSets = r.count
+      const existing = await prisma.checklistSet.findMany({ select: { id: true } })
+      const rows = filterNew(existing, checklistSets as Row[])
+      if (rows.length > 0) {
+        const r = await prisma.checklistSet.createMany({
+          data: rows.map(s => ({
+            id: s.id as string,
+            title: s.title as string,
+            category: (s.category ?? 'general') as string,
+            items: (s.items ?? '[]') as string,
+            relatedTemplateId: (s.relatedTemplateId ?? null) as string | null,
+            createdAt: new Date(s.createdAt as string),
+            updatedAt: new Date(s.updatedAt as string),
+          })),
+        })
+        results.checklistSets = r.count
+      }
     }
 
-    // 3. ChecklistRuns — top-level list (not the embedded runs inside checklistSets)
+    // 3. ChecklistRuns
     if (Array.isArray(checklistRuns) && checklistRuns.length > 0) {
-      const r = await prisma.checklistRun.createMany({
-        data: checklistRuns.map((r: Record<string, unknown>) => ({
-          id: r.id as string,
-          checklistSetId: r.checklistSetId as string,
-          checkedItems: (r.checkedItems ?? '{}') as string,
-          note: (r.note ?? '') as string,
-          createdAt: new Date(r.createdAt as string),
-        })),
-        skipDuplicates: true,
-      })
-      results.checklistRuns = r.count
+      const existing = await prisma.checklistRun.findMany({ select: { id: true } })
+      const rows = filterNew(existing, checklistRuns as Row[])
+      if (rows.length > 0) {
+        const r = await prisma.checklistRun.createMany({
+          data: rows.map(run => ({
+            id: run.id as string,
+            checklistSetId: run.checklistSetId as string,
+            checkedItems: (run.checkedItems ?? '{}') as string,
+            note: (run.note ?? '') as string,
+            createdAt: new Date(run.createdAt as string),
+          })),
+        })
+        results.checklistRuns = r.count
+      }
     }
 
     // 4. KnowledgePitfalls
     if (Array.isArray(knowledgePitfalls) && knowledgePitfalls.length > 0) {
-      const r = await prisma.knowledgePitfall.createMany({
-        data: knowledgePitfalls.map((p: Record<string, unknown>) => ({
-          id: p.id as string,
-          scenario: p.scenario as string,
-          symptom: p.symptom as string,
-          triggerCondition: (p.triggerCondition ?? '') as string,
-          suggestion: p.suggestion as string,
-          tags: (p.tags ?? '') as string,
-          relatedTemplateId: (p.relatedTemplateId ?? null) as string | null,
-          createdAt: new Date(p.createdAt as string),
-          updatedAt: new Date(p.updatedAt as string),
-        })),
-        skipDuplicates: true,
-      })
-      results.pitfalls = r.count
+      const existing = await prisma.knowledgePitfall.findMany({ select: { id: true } })
+      const rows = filterNew(existing, knowledgePitfalls as Row[])
+      if (rows.length > 0) {
+        const r = await prisma.knowledgePitfall.createMany({
+          data: rows.map(p => ({
+            id: p.id as string,
+            scenario: p.scenario as string,
+            symptom: p.symptom as string,
+            triggerCondition: (p.triggerCondition ?? '') as string,
+            suggestion: p.suggestion as string,
+            tags: (p.tags ?? '') as string,
+            relatedTemplateId: (p.relatedTemplateId ?? null) as string | null,
+            createdAt: new Date(p.createdAt as string),
+            updatedAt: new Date(p.updatedAt as string),
+          })),
+        })
+        results.pitfalls = r.count
+      }
     }
 
     // 5. KnowledgeCases
     if (Array.isArray(knowledgeCases) && knowledgeCases.length > 0) {
-      const r = await prisma.knowledgeCase.createMany({
-        data: knowledgeCases.map((c: Record<string, unknown>) => ({
-          id: c.id as string,
-          title: c.title as string,
-          scenario: c.scenario as string,
-          promptFullText: (c.promptFullText ?? '') as string,
-          outputSummary: (c.outputSummary ?? '') as string,
-          relatedTemplateId: (c.relatedTemplateId ?? null) as string | null,
-          tags: (c.tags ?? '') as string,
-          createdAt: new Date(c.createdAt as string),
-          updatedAt: new Date(c.updatedAt as string),
-        })),
-        skipDuplicates: true,
-      })
-      results.cases = r.count
+      const existing = await prisma.knowledgeCase.findMany({ select: { id: true } })
+      const rows = filterNew(existing, knowledgeCases as Row[])
+      if (rows.length > 0) {
+        const r = await prisma.knowledgeCase.createMany({
+          data: rows.map(c => ({
+            id: c.id as string,
+            title: c.title as string,
+            scenario: c.scenario as string,
+            promptFullText: (c.promptFullText ?? '') as string,
+            outputSummary: (c.outputSummary ?? '') as string,
+            relatedTemplateId: (c.relatedTemplateId ?? null) as string | null,
+            tags: (c.tags ?? '') as string,
+            createdAt: new Date(c.createdAt as string),
+            updatedAt: new Date(c.updatedAt as string),
+          })),
+        })
+        results.cases = r.count
+      }
     }
 
     const total = Object.values(results).reduce((a, b) => a + b, 0)
