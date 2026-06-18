@@ -131,7 +131,7 @@ export default function NewTemplatePage() {
               </button>
             </div>
             {params.length === 0 && (
-              <p className="text-xs" style={{ color: 'var(--text-dim)' }}>暂无参数。点击"添加参数"定义占位符，例如 company_name → 公司名称</p>
+              <p className="text-xs" style={{ color: 'var(--text-dim)' }}>暂无参数。点击「添加参数」定义占位符，例如 company_name → 公司名称</p>
             )}
             <div className="space-y-2">
               {params.map((p, i) => (

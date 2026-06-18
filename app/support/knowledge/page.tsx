@@ -31,7 +31,7 @@ export default function KnowledgePage() {
     setLoading(false)
   }
 
-  useEffect(() => { fetchData() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchData() }, []) // eslint-disable-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
 
   const search = (e: React.FormEvent) => { e.preventDefault(); fetchData() }
 

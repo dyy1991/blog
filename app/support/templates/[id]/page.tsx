@@ -11,7 +11,6 @@ type Template = {
 }
 
 const CATEGORIES = ['尽调', '竞对分析', '行业对比', '财务分析', '公司摘要', 'general']
-const DEFAULT_GUARD = '仅基于本次提供的材料作答；每个关键数据请注明对应材料的章节或位置；若材料未提及，请直接说明「材料未提及」，不要使用先验知识推测或补全；若本对话此前提到过其他公司的材料，请不要混用其数据或结论。'
 
 function assemblePrompt(t: Template, values: Record<string, string>): string {
   const replace = (s: string) =>

@@ -99,7 +99,7 @@ export default function NewChecklistPage() {
 
           {items.length === 0 ? (
             <p className="text-xs py-4 text-center" style={{ color: 'var(--text-dim)' }}>
-              点击"加载通用模板"快速开始，或手动添加核查项目
+              点击「加载通用模板」快速开始，或手动添加核查项目
             </p>
           ) : (
             <div className="space-y-2">
