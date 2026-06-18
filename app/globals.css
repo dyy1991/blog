@@ -101,4 +101,14 @@ body {
 .prose ul li::marker { color:var(--green); }
 .prose ol li::marker { color:var(--blue); }
 .prose table { width:100%; border-collapse:collapse; margin:1.4em 0; }
-.prose th { background:var(--bg-hover); color:var(--text-bright); padding
+.prose th { background:var(--bg-hover); color:var(--text-bright); padding:0.6em 1em; text-align:left; border-bottom:2px solid var(--border); font-size:0.85em; }
+.prose td { padding:0.5em 1em; border-bottom:1px solid var(--border); font-size:0.9em; }
+.prose tr:last-child td { border-bottom:none; }
+.prose a { color:var(--blue); text-decoration:underline; text-underline-offset:2px; }
+.prose a:hover { color:var(--green); }
+.prose hr { border:none; border-top:1px solid var(--border); margin:2em 0; }
+.prose img { max-width:100%; border-radius:6px; margin:1.2em 0; }
+
+/* hover-color helpers used by nav links */
+.hover-green:hover { color: var(--green) !important; }
+.hover-blue:hover { color: var(--blue) !important; }
