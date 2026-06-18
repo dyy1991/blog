@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
+import ImportExportBar from './ImportExportBar'
 
 export default async function SupportDashboard() {
   const [templateCount, checklistCount, pitfallCount, caseCount, recentRuns] = await Promise.all([
@@ -77,7 +78,7 @@ export default async function SupportDashboard() {
         <div className="text-xs mb-3 font-semibold" style={{ color: 'var(--text-bright)' }}>
           <span style={{ color: 'var(--green)' }}># </span>快速操作
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 mb-4">
           {[
             { href: '/support/templates/new',  label: '+ 新建模板' },
             { href: '/support/checklist/new',  label: '+ 新建 Checklist' },
@@ -90,6 +91,7 @@ export default async function SupportDashboard() {
             </Link>
           ))}
         </div>
+        <ImportExportBar />
       </section>
 
       {/* 最近核查记录 */}
