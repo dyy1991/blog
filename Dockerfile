@@ -6,6 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 # 复制 prisma schema，npm ci 后立即生成 client
 COPY prisma ./prisma/
+RUN apk add --no-cache openssl
 RUN npm ci
 RUN npx prisma generate
 
