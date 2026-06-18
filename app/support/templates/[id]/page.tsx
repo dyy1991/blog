@@ -37,7 +37,7 @@ function TemplatePageInner() {
   const [saving, setSaving] = useState(false)
 
   // Edit mode state
-  const [editForm, setEditForm] = useState<Omit<Template, 'id' | 'usageCount'> & { params: Param[] } | null>(null)
+  const [editForm, setEditForm] = useState<Omit<Template, 'id' | 'usageCount' | 'params'> & { params: Param[] } | null>(null)
 
   useEffect(() => {
     fetch(`/api/support/templates/${id}`)
