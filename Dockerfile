@@ -6,6 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 # 复制 prisma schema，npm ci 后立即生成 client
 COPY prisma ./prisma/
+# Prisma query engine 在 Alpine 需要 openssl（构建阶段预渲染时也会加载）
 RUN apk add --no-cache openssl
 RUN npm ci
 RUN npx prisma generate
@@ -22,6 +23,8 @@ RUN apk add --no-cache openssl
 
 ENV NODE_ENV=production
 ENV DATABASE_URL="file:/data/support.db"
+# 绕过 Prisma OpenSSL 版本自动检测，直接指定 Alpine(musl+openssl3) 二进制
+ENV PRISMA_QUERY_ENGINE_LIBRARY=/app/node_modules/.prisma/client/libquery_engine-linux-musl-openssl-3.0.x.so.node
 
 # Next.js standalone 模式输出
 COPY --from=builder /app/.next/standalone ./

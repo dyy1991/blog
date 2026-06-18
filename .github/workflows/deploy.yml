@@ -133,14 +133,18 @@ jobs:
 
     steps:
       - name: Wait for service to start
-        run: sleep 15
+        run: sleep 20
 
-      - name: Check HTTP response
+      - name: Check HTTP response (with retry)
         run: |
-          STATUS=$(curl -o /dev/null -s -w "%{http_code}" http://${{ secrets.SERVER_HOST }}:8080)
-          echo "HTTP status: $STATUS"
-          if [ "$STATUS" != "200" ]; then
-            echo "❌ Health check failed! Status: $STATUS"
-            exit 1
-          fi
-          echo "✅ Service is healthy"
+          for i in $(seq 1 12); do
+            STATUS=$(curl -o /dev/null -s -w "%{http_code}" http://${{ secrets.SERVER_HOST }}:8080)
+            echo "Attempt $i/12: HTTP status: $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Service is healthy"
+              exit 0
+            fi
+            [ $i -lt 12 ] && sleep 5
+          done
+          echo "❌ Health check failed after 12 attempts (last status: $STATUS)"
+          exit 1
