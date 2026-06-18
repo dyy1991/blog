@@ -59,16 +59,12 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
 
       {/* Footer nav */}
       <div className="mt-12 pt-6 flex justify-between text-xs" style={{ borderTop: '1px solid var(--border)' }}>
-        <Link href="/blog" className="no-underline transition-colors"
-              style={{ color: 'var(--text-dim)' }}
-              onMouseOver={e => (e.target as HTMLElement).style.color = 'var(--green)'}
-              onMouseOut={e => (e.target as HTMLElement).style.color = 'var(--text-dim)'}>
+        <Link href="/blog" className="no-underline hover-green"
+              style={{ color: 'var(--text-dim)' }}>
           ← back to blog
         </Link>
-        <Link href="/write" className="no-underline transition-colors"
-              style={{ color: 'var(--text-dim)' }}
-              onMouseOver={e => (e.target as HTMLElement).style.color = 'var(--green)'}
-              onMouseOut={e => (e.target as HTMLElement).style.color = 'var(--text-dim)'}>
+        <Link href="/write" className="no-underline hover-green"
+              style={{ color: 'var(--text-dim)' }}>
           write a post →
         </Link>
       </div>

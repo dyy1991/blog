@@ -33,10 +33,8 @@ export default function Home() {
           <h2 className="text-sm font-semibold" style={{ color: 'var(--text-bright)' }}>
             <span style={{ color: 'var(--green)' }}># </span>recent_posts
           </h2>
-          <Link href="/blog" className="text-xs no-underline transition-colors"
-                style={{ color: 'var(--text-dim)' }}
-                onMouseOver={e => (e.target as HTMLElement).style.color = 'var(--green)'}
-                onMouseOut={e => (e.target as HTMLElement).style.color = 'var(--text-dim)'}>
+          <Link href="/blog" className="text-xs no-underline hover-green"
+                style={{ color: 'var(--text-dim)' }}>
             view all →
           </Link>
         </div>
@@ -90,16 +88,8 @@ export default function Home() {
           <div className="flex flex-wrap gap-2">
             {categories.map(cat => (
               <Link key={cat} href={`/blog?cat=${cat}`}
-                    className="text-xs px-3 py-1.5 rounded no-underline transition-colors"
-                    style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}
-                    onMouseOver={e => {
-                      (e.target as HTMLElement).style.color = 'var(--blue)'
-                      ;(e.target as HTMLElement).style.borderColor = 'var(--blue)'
-                    }}
-                    onMouseOut={e => {
-                      (e.target as HTMLElement).style.color = 'var(--text-muted)'
-                      ;(e.target as HTMLElement).style.borderColor = 'var(--border)'
-                    }}>
+                    className="text-xs px-3 py-1.5 rounded no-underline hover-blue"
+                    style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
                 {cat}
               </Link>
             ))}

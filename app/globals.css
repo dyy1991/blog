@@ -44,6 +44,11 @@ body {
 .glow-green { text-shadow: 0 0 10px rgba(0,255,136,0.7), 0 0 20px rgba(0,255,136,0.3); }
 .glow-blue  { text-shadow: 0 0 10px rgba(88,166,255,0.7), 0 0 20px rgba(88,166,255,0.3); }
 
+.hover-green { transition: color 0.15s; }
+.hover-green:hover { color: var(--green) !important; }
+.hover-blue  { transition: color 0.15s, border-color 0.15s; }
+.hover-blue:hover { color: var(--blue) !important; border-color: var(--blue) !important; }
+
 .terminal-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
