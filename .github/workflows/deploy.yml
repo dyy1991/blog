@@ -12,9 +12,32 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  # ── Job 0: 代码质量检查（lint + 类型检查）──
+  check:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
   # ── Job 1: 构建并推送镜像到 GitHub Container Registry ──
   build:
     name: Build Docker Image
+    needs: check          # check 通过才构建
     runs-on: ubuntu-latest
     permissions:
       contents: read
