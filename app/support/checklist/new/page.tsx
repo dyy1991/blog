@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
 type Item = { id: string; text: string; required: boolean }
+type TemplateOption = { id: string; title: string }
 
 const CATEGORIES = ['材料分析', '财务核查', '竞对分析', '多步骤任务', 'general']
 
@@ -22,6 +23,12 @@ export default function NewChecklistPage() {
   const [title, setTitle] = useState('')
   const [category, setCategory] = useState('general')
   const [items, setItems] = useState<Item[]>([])
+  const [relatedTemplateId, setRelatedTemplateId] = useState('')
+  const [templates, setTemplates] = useState<TemplateOption[]>([])
+
+  useEffect(() => {
+    fetch('/api/support/templates').then(r => r.json()).then(setTemplates)
+  }, [])
 
   const addItem = () => setItems(prev => [
     ...prev,
@@ -38,7 +45,7 @@ export default function NewChecklistPage() {
     const res = await fetch('/api/support/checklist-sets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, category, items }),
+      body: JSON.stringify({ title, category, items, relatedTemplateId: relatedTemplateId || null }),
     })
     if (res.ok) router.push('/support/checklist')
     else setSaving(false)
@@ -50,12 +57,12 @@ export default function NewChecklistPage() {
     padding: '8px 10px', fontSize: '13px', width: '100%',
     outline: 'none', fontFamily: 'inherit',
   }
-  const labelStyle = { color: 'var(--text-dim)', fontSize: '11px', marginBottom: '4px', display: 'block' as const }
+  const labelStyle = { color: 'var(--text-muted)', fontSize: '11px', marginBottom: '4px', display: 'block' as const }
 
   return (
     <div className="max-w-2xl">
       <div className="mb-6">
-        <div className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>~/support/checklist/new</div>
+        <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>~/support/checklist/new</div>
         <h1 className="text-lg font-bold" style={{ color: 'var(--text-bright)' }}>
           <span style={{ color: 'var(--blue)' }}>+ </span>新建 Checklist
         </h1>
@@ -69,12 +76,19 @@ export default function NewChecklistPage() {
               <input style={inputStyle} value={title} onChange={e => setTitle(e.target.value)}
                 placeholder="例：材料分析类通用核查清单" />
             </div>
-            <div className="w-40">
+            <div className="w-36">
               <label style={labelStyle}>分类</label>
               <select style={inputStyle} value={category} onChange={e => setCategory(e.target.value)}>
                 {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
+          </div>
+          <div>
+            <label style={labelStyle}>关联 Prompt 模板 <span style={{ color: 'var(--text-dim)' }}>（选填，关联后在模板使用页自动显示此清单）</span></label>
+            <select style={inputStyle} value={relatedTemplateId} onChange={e => setRelatedTemplateId(e.target.value)}>
+              <option value="">不关联</option>
+              {templates.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
+            </select>
           </div>
         </div>
 
@@ -98,14 +112,14 @@ export default function NewChecklistPage() {
           </div>
 
           {items.length === 0 ? (
-            <p className="text-xs py-4 text-center" style={{ color: 'var(--text-dim)' }}>
+            <p className="text-xs py-4 text-center" style={{ color: 'var(--text-muted)' }}>
               点击「加载通用模板」快速开始，或手动添加核查项目
             </p>
           ) : (
             <div className="space-y-2">
               {items.map((item, i) => (
                 <div key={item.id} className="flex items-start gap-2">
-                  <span className="text-xs mt-2.5 w-5 shrink-0 text-right" style={{ color: 'var(--text-dim)' }}>
+                  <span className="text-xs mt-2.5 w-5 shrink-0 text-right" style={{ color: 'var(--text-muted)' }}>
                     {String(i + 1).padStart(2, '0')}
                   </span>
                   <div className="flex-1">
@@ -117,10 +131,10 @@ export default function NewChecklistPage() {
                   <label className="flex items-center gap-1 mt-2 shrink-0 cursor-pointer">
                     <input type="checkbox" checked={item.required}
                       onChange={e => updateItem(item.id, 'required', e.target.checked)} />
-                    <span className="text-xs" style={{ color: 'var(--text-dim)' }}>必查</span>
+                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>必查</span>
                   </label>
                   <button onClick={() => removeItem(item.id)}
-                    className="mt-1.5 shrink-0" style={{ color: 'var(--text-dim)', fontSize: '16px' }}>×</button>
+                    className="mt-1.5 shrink-0" style={{ color: 'var(--text-muted)', fontSize: '16px' }}>×</button>
                 </div>
               ))}
             </div>

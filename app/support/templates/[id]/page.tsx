@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, Suspense } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
+import Link from 'next/link'
 
 type Param = { key: string; label: string; placeholder: string }
 type Template = {
@@ -9,6 +10,8 @@ type Template = {
   roleText: string; taskTemplate: string; formatText: string; guardText: string
   params: string; usageCount: number
 }
+type RelatedChecklist = { id: string; title: string; category: string }
+type RelatedPitfall = { id: string; scenario: string; symptom: string; suggestion: string }
 
 const CATEGORIES = ['尽调', '竞对分析', '行业对比', '财务分析', '公司摘要', 'general']
 
@@ -24,6 +27,22 @@ function assemblePrompt(t: Template, values: Record<string, string>): string {
   ].filter(Boolean).join('')
 }
 
+// Clipboard fallback for non-HTTPS environments
+function copyText(text: string): Promise<void> {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text)
+  }
+  const el = document.createElement('textarea')
+  el.value = text
+  el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0'
+  document.body.appendChild(el)
+  el.focus()
+  el.select()
+  document.execCommand('copy')
+  document.body.removeChild(el)
+  return Promise.resolve()
+}
+
 function TemplatePageInner() {
   const { id } = useParams<{ id: string }>()
   const searchParams = useSearchParams()
@@ -34,6 +53,8 @@ function TemplatePageInner() {
   const [values, setValues] = useState<Record<string, string>>({})
   const [copied, setCopied] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [relatedChecklists, setRelatedChecklists] = useState<RelatedChecklist[]>([])
+  const [relatedPitfalls, setRelatedPitfalls] = useState<RelatedPitfall[]>([])
 
   // Edit mode state
   const [editForm, setEditForm] = useState<Omit<Template, 'id' | 'usageCount' | 'params'> & { params: Param[] } | null>(null)
@@ -55,19 +76,33 @@ function TemplatePageInner() {
           })
         }
       })
+    // Fetch related items for use mode
+    if (!isEdit) {
+      Promise.all([
+        fetch(`/api/support/checklist-sets?relatedTemplateId=${id}`).then(r => r.json()),
+        fetch(`/api/support/knowledge/pitfalls?relatedTemplateId=${id}`).then(r => r.json()),
+      ]).then(([cls, pfs]) => {
+        setRelatedChecklists(cls)
+        setRelatedPitfalls(pfs)
+      })
+    }
   }, [id, isEdit])
 
   const copy = useCallback(async () => {
     if (!template) return
     const text = assemblePrompt(template, values)
-    await navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-    fetch(`/api/support/templates/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ incrementUsage: true }),
-    })
+    try {
+      await copyText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+      fetch(`/api/support/templates/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ incrementUsage: true }),
+      })
+    } catch (err) {
+      console.error('Copy failed:', err)
+    }
   }, [template, values, id])
 
   const saveEdit = async () => {
@@ -93,9 +128,9 @@ function TemplatePageInner() {
     padding: '8px 10px', fontSize: '13px', width: '100%',
     outline: 'none', fontFamily: 'inherit',
   }
-  const labelStyle = { color: 'var(--text-dim)', fontSize: '11px', marginBottom: '4px', display: 'block' as const }
+  const labelStyle = { color: 'var(--text-muted)', fontSize: '11px', marginBottom: '4px', display: 'block' as const }
 
-  if (!template) return <div className="text-xs" style={{ color: 'var(--text-dim)' }}>加载中...</div>
+  if (!template) return <div className="text-xs" style={{ color: 'var(--text-muted)' }}>加载中...</div>
 
   const params: Param[] = JSON.parse(template.params || '[]')
 
@@ -110,7 +145,7 @@ function TemplatePageInner() {
     return (
       <div>
         <div className="mb-6">
-          <div className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>编辑模板</div>
+          <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>编辑模板</div>
           <h1 className="text-lg font-bold" style={{ color: 'var(--text-bright)' }}>
             <span style={{ color: 'var(--green)' }}>✎ </span>{editForm.title}
           </h1>
@@ -167,7 +202,7 @@ function TemplatePageInner() {
                       onChange={e => updateParam(i, 'label', e.target.value)} />
                     <input style={{ ...inputStyle, flex: 1 }} placeholder="示例值" value={p.placeholder}
                       onChange={e => updateParam(i, 'placeholder', e.target.value)} />
-                    <button onClick={() => removeParam(i)} style={{ color: 'var(--text-dim)', fontSize: '16px' }}>×</button>
+                    <button onClick={() => removeParam(i)} style={{ color: 'var(--text-muted)', fontSize: '16px' }}>×</button>
                   </div>
                 ))}
               </div>
@@ -205,12 +240,12 @@ function TemplatePageInner() {
   return (
     <div>
       <div className="mb-6">
-        <div className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>~/support/templates / 使用</div>
+        <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>~/support/templates / 使用</div>
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold" style={{ color: 'var(--text-bright)' }}>
             <span style={{ color: 'var(--green)' }}>{'{ } '}</span>{template.title}
           </h1>
-          <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-dim)' }}>
+          <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-muted)' }}>
             <span className="px-2 py-0.5 rounded"
               style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
               {template.category}
@@ -226,7 +261,7 @@ function TemplatePageInner() {
           <div className="sticky top-24 terminal-card p-4">
             <div className="text-xs font-semibold mb-4" style={{ color: 'var(--blue)' }}>填写参数</div>
             {params.length === 0 ? (
-              <p className="text-xs" style={{ color: 'var(--text-dim)' }}>此模板无参数，可直接复制</p>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>此模板无参数，可直接复制</p>
             ) : (
               <div className="space-y-3">
                 {params.map(p => (
@@ -256,7 +291,7 @@ function TemplatePageInner() {
               {copied ? '✓ 已复制！' : '📋 复制 Prompt'}
             </button>
             {params.length > 0 && !allFilled && (
-              <p className="text-xs mt-2 text-center" style={{ color: 'var(--text-dim)' }}>请先填写所有参数</p>
+              <p className="text-xs mt-2 text-center" style={{ color: 'var(--text-muted)' }}>请先填写所有参数</p>
             )}
           </div>
         </div>
@@ -267,7 +302,7 @@ function TemplatePageInner() {
             <span className="w-3 h-3 rounded-full" style={{ background: '#ff5f57' }} />
             <span className="w-3 h-3 rounded-full" style={{ background: '#febc2e' }} />
             <span className="w-3 h-3 rounded-full" style={{ background: '#28c840' }} />
-            <span className="text-xs ml-2" style={{ color: 'var(--text-dim)' }}>prompt_preview.txt</span>
+            <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>prompt_preview.txt</span>
           </div>
           <div className="p-6">
             <pre className="text-sm whitespace-pre-wrap leading-relaxed font-mono" style={{ color: 'var(--text-bright)' }}>
@@ -276,6 +311,50 @@ function TemplatePageInner() {
           </div>
         </div>
       </div>
+
+      {/* ── 关联内容：使用前确认 ──────────────────────── */}
+      {(relatedChecklists.length > 0 || relatedPitfalls.length > 0) && (
+        <div className="mt-8">
+          <div className="text-xs font-semibold mb-3" style={{ color: 'var(--text-muted)' }}>
+            ── 使用前确认 ──────────────────────────────────
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            {relatedChecklists.length > 0 && (
+              <div className="terminal-card p-4">
+                <div className="text-xs font-semibold mb-3" style={{ color: 'var(--blue)' }}>
+                  {'[ ] '} 关联 Checklist（{relatedChecklists.length}）
+                </div>
+                <div className="space-y-2">
+                  {relatedChecklists.map(cl => (
+                    <Link key={cl.id} href={`/support/checklist/${cl.id}`}
+                      className="flex items-center justify-between px-3 py-2 rounded no-underline group"
+                      style={{ background: 'var(--bg-hover)', border: '1px solid var(--border)' }}>
+                      <span className="text-xs" style={{ color: 'var(--text-bright)' }}>{cl.title}</span>
+                      <span className="text-xs opacity-60" style={{ color: 'var(--blue)' }}>运行 →</span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+            {relatedPitfalls.length > 0 && (
+              <div className="terminal-card p-4">
+                <div className="text-xs font-semibold mb-3" style={{ color: 'var(--yellow)' }}>
+                  ⚠ 已知坑位（{relatedPitfalls.length}）
+                </div>
+                <div className="space-y-2">
+                  {relatedPitfalls.map(p => (
+                    <div key={p.id} className="px-3 py-2 rounded text-xs"
+                      style={{ background: 'rgba(255,166,87,0.06)', border: '1px solid rgba(255,166,87,0.15)' }}>
+                      <div className="font-medium mb-0.5" style={{ color: 'var(--yellow)' }}>{p.scenario}</div>
+                      <div style={{ color: 'var(--text-muted)' }}>{p.symptom}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -1,7 +1,9 @@
 'use client'
 
-import { useState, Suspense } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+
+type TemplateOption = { id: string; title: string }
 
 function NewKnowledgePageInner() {
   const router = useRouter()
@@ -10,9 +12,15 @@ function NewKnowledgePageInner() {
 
   const [type, setType] = useState<'pitfall' | 'case'>(defaultType)
   const [saving, setSaving] = useState(false)
+  const [relatedTemplateId, setRelatedTemplateId] = useState('')
+  const [templates, setTemplates] = useState<TemplateOption[]>([])
 
   const [pitfall, setPitfall] = useState({ scenario: '', symptom: '', triggerCondition: '', suggestion: '', tags: '' })
   const [kcase, setKcase] = useState({ title: '', scenario: '', promptFullText: '', outputSummary: '', tags: '' })
+
+  useEffect(() => {
+    fetch('/api/support/templates').then(r => r.json()).then(setTemplates)
+  }, [])
 
   const setP = (k: keyof typeof pitfall, v: string) => setPitfall(f => ({ ...f, [k]: v }))
   const setC = (k: keyof typeof kcase, v: string) => setKcase(f => ({ ...f, [k]: v }))
@@ -24,7 +32,7 @@ function NewKnowledgePageInner() {
       const res = await fetch('/api/support/knowledge/pitfalls', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(pitfall),
+        body: JSON.stringify({ ...pitfall, relatedTemplateId: relatedTemplateId || null }),
       })
       if (res.ok) router.push('/support/knowledge')
     } else {
@@ -32,7 +40,7 @@ function NewKnowledgePageInner() {
       const res = await fetch('/api/support/knowledge/cases', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(kcase),
+        body: JSON.stringify({ ...kcase, relatedTemplateId: relatedTemplateId || null }),
       })
       if (res.ok) router.push('/support/knowledge')
     }
@@ -46,7 +54,7 @@ function NewKnowledgePageInner() {
     outline: 'none', fontFamily: 'inherit',
   }
   const textareaStyle = { ...inputStyle, minHeight: '80px', resize: 'vertical' as const }
-  const labelStyle = { color: 'var(--text-dim)', fontSize: '11px', marginBottom: '4px', display: 'block' as const }
+  const labelStyle = { color: 'var(--text-muted)', fontSize: '11px', marginBottom: '4px', display: 'block' as const }
 
   const canSave = type === 'pitfall'
     ? !!(pitfall.scenario && pitfall.symptom && pitfall.suggestion)
@@ -55,7 +63,7 @@ function NewKnowledgePageInner() {
   return (
     <div className="max-w-2xl">
       <div className="mb-6">
-        <div className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>~/support/knowledge/new</div>
+        <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>~/support/knowledge/new</div>
         <h1 className="text-lg font-bold" style={{ color: 'var(--text-bright)' }}>
           <span style={{ color: 'var(--cyan)' }}>+ </span>新增知识记录
         </h1>
@@ -77,6 +85,17 @@ function NewKnowledgePageInner() {
       </div>
 
       <div className="terminal-card p-5 space-y-4">
+        {/* 关联模板选择器 */}
+        <div>
+          <label style={labelStyle}>
+            关联 Prompt 模板 <span style={{ color: 'var(--text-dim)' }}>（选填，关联后在模板使用页自动显示{type === 'pitfall' ? '此坑位' : '此案例'}）</span>
+          </label>
+          <select style={inputStyle} value={relatedTemplateId} onChange={e => setRelatedTemplateId(e.target.value)}>
+            <option value="">不关联</option>
+            {templates.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
+          </select>
+        </div>
+
         {type === 'pitfall' ? (
           <>
             <div>
@@ -87,7 +106,7 @@ function NewKnowledgePageInner() {
             <div>
               <label style={labelStyle}>错误表现 * <span style={{ color: 'var(--text-dim)' }}>（AI 具体出了什么问题）</span></label>
               <textarea style={textareaStyle} value={pitfall.symptom} onChange={e => setP('symptom', e.target.value)}
-                placeholder="例：将 A 公司 2023 年的营收数据（材料一）错误引用到 B 公司分析结论中" />
+                placeholder="例：将 A 公司 2023 年的营收数据错误引用到 B 公司分析结论中" />
             </div>
             <div>
               <label style={labelStyle}>触发条件 <span style={{ color: 'var(--text-dim)' }}>（什么情况下容易出现）</span></label>
@@ -97,7 +116,7 @@ function NewKnowledgePageInner() {
             <div>
               <label style={labelStyle}>应对建议 *</label>
               <textarea style={textareaStyle} value={pitfall.suggestion} onChange={e => setP('suggestion', e.target.value)}
-                placeholder="例：在 Prompt 开头明确说「本次只分析 X 公司，请忽略之前对其他公司的分析」" />
+                placeholder="例：在 Prompt 开头明确说「本次只分析 X 公司，请忽略之前的分析」" />
             </div>
             <div>
               <label style={labelStyle}>标签 <span style={{ color: 'var(--text-dim)' }}>（逗号分隔）</span></label>

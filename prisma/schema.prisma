@@ -33,6 +33,7 @@ model ChecklistSet {
   items     String         @default("[]")
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
+  relatedTemplateId String?
   runs      ChecklistRun[]
 }
 

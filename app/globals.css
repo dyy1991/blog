@@ -7,8 +7,8 @@
   --bg-card: #0c1220;
   --bg-hover: #101929;
   --border: #1a2d45;
-  --text-dim: #3d5a78;
-  --text-muted: #5a7a9a;
+  --text-dim: #6b9abd;
+  --text-muted: #7baec8;
   --text: #8ab4d8;
   --text-bright: #c9dff0;
   --green: #00ff88;
@@ -101,7 +101,4 @@ body {
 .prose ul li::marker { color:var(--green); }
 .prose ol li::marker { color:var(--blue); }
 .prose table { width:100%; border-collapse:collapse; margin:1.4em 0; }
-.prose th { background:var(--bg-hover); color:var(--text-bright); padding:8px 12px; border:1px solid var(--border); }
-.prose td { padding:8px 12px; border:1px solid var(--border); }
-.prose tr:nth-child(even) { background:rgba(255,255,255,0.02); }
-.prose hr { border:none; border-top:1px solid var(--border); margin:2em 0; }
+.prose th { background:var(--bg-hover); color:var(--text-bright); padding

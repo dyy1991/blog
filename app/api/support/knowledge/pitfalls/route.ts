@@ -5,9 +5,11 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const q = searchParams.get('q')
   const tag = searchParams.get('tag')
+  const relatedTemplateId = searchParams.get('relatedTemplateId')
 
   const pitfalls = await prisma.knowledgePitfall.findMany({
     where: {
+      ...(relatedTemplateId ? { relatedTemplateId } : {}),
       ...(q ? {
         OR: [
           { scenario: { contains: q } },
