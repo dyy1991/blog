@@ -73,3 +73,16 @@ model KnowledgeCase {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }
+
+// ── 读书打卡记录 ────────────────────────────────────────────
+model CheckIn {
+  id        String   @id @default(cuid())
+  user      String
+  date      String   // YYYY-MM-DD
+  minutes   Int      @default(0)
+  note      String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([user, date])
+}
