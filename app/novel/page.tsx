@@ -155,6 +155,9 @@ export default function NovelStudioPage() {
   const [branchId, setBranchId] = useState('')
   const [selected, setSelected] = useState<NodeT | null>(null)
 
+  const [editLabel, setEditLabel] = useState('')
+  const [editContent, setEditContent] = useState('')
+  const [editType, setEditType] = useState('')
   const [intakeText, setIntakeText] = useState('')
   const [planResult, setPlanResult] = useState<ToolResultT | null>(null)
   const [draftPrompt, setDraftPrompt] = useState('')
@@ -321,6 +324,35 @@ export default function NovelStudioPage() {
       URL.revokeObjectURL(url)
     })
 
+  const selectNode = (node: NodeT) => {
+    setSelected(node)
+    setEditLabel(node.label)
+    setEditContent(node.content)
+    setEditType(node.type)
+  }
+
+  const saveNode = () =>
+    run(async () => {
+      if (!selected) return
+      await api(key, `projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(selected.node_id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ label: editLabel, content: editContent, type: editType })
+      })
+      setSelected(null)
+      await loadGraph(key, projectId, branchId)
+    })
+
+  const deleteNode = () =>
+    run(async () => {
+      if (!selected) return
+      if (!window.confirm(`删除节点「${selected.label}」?关联的连线也会一并移除。`)) return
+      await api(key, `projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(selected.node_id)}`, {
+        method: 'DELETE'
+      })
+      setSelected(null)
+      await loadGraph(key, projectId, branchId)
+    })
+
   const importJsonFile = (file: File) =>
     run(async () => {
       const content = await file.text()
@@ -399,7 +431,8 @@ export default function NovelStudioPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-6">
+    // 全屏出血:突破博客 layout 的 max-w-5xl 限制,给思维导图更多横向空间
+    <div className="relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen px-4 py-6 lg:px-8">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="mr-2 text-xl font-bold">小说工坊</h1>
         <select
@@ -484,11 +517,11 @@ export default function NovelStudioPage() {
       {busy && <p className="mt-2 text-sm text-gray-400">处理中…</p>}
 
       <div className="mt-4 flex flex-col gap-4 lg:flex-row">
-        <div className="min-h-[420px] flex-1 overflow-hidden rounded-xl border border-gray-200 bg-white">
+        <div className="h-[calc(100vh-16rem)] min-h-[520px] flex-1 overflow-hidden rounded-xl border border-gray-200 bg-white">
           {layout && graph ? (
             <svg
               width="100%"
-              height={Math.max(layout.height, 480)}
+              height="100%"
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
@@ -573,7 +606,7 @@ export default function NovelStudioPage() {
                     return (
                       <g
                         key={laid.node.node_id}
-                        onClick={() => setSelected(laid.node)}
+                        onClick={() => selectNode(laid.node)}
                         className="cursor-pointer"
                       >
                         <rect
@@ -597,13 +630,34 @@ export default function NovelStudioPage() {
               </g>
             </svg>
           ) : (
-            <div className="flex h-full min-h-[420px] items-center justify-center text-sm text-gray-400">
+            <div className="flex h-full items-center justify-center text-sm text-gray-400">
               {projects.length === 0 ? '还没有项目,点击「+ 新项目」开始' : '加载图谱中…'}
             </div>
           )}
         </div>
 
         <div className="w-full space-y-4 lg:w-96">
+          {layout && layout.groups.length > 0 && (
+            <div className="rounded-xl border border-gray-200 bg-white p-4 text-slate-800">
+              <h2 className="text-sm font-semibold text-gray-500">图例 · 节点类型</h2>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+                {layout.groups.map((group) => {
+                  const meta = typeMeta(group.type)
+                  return (
+                    <span key={group.type} className="flex items-center gap-1.5 text-xs">
+                      <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: meta.color }} />
+                      {meta.name}
+                      <span className="text-gray-400">{group.nodes.length}</span>
+                    </span>
+                  )
+                })}
+              </div>
+              <p className="mt-2 border-t border-gray-100 pt-2 text-xs text-gray-400">
+                类型由输入文本自动判定,可在节点详情中修改;粉色虚线表示节点间的从属/关联关系。
+              </p>
+            </div>
+          )}
+
           {selected && (
             <div className="rounded-xl border border-blue-300 bg-white p-4 text-slate-800">
               <div className="flex items-start justify-between gap-2">
@@ -620,13 +674,48 @@ export default function NovelStudioPage() {
                   关闭
                 </button>
               </div>
-              <p className="mt-2 font-semibold leading-snug">{selected.label}</p>
+              <input
+                value={editLabel}
+                onChange={(event) => setEditLabel(event.target.value)}
+                className="mt-2 w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm font-semibold text-slate-800 focus:border-blue-500 focus:outline-none"
+              />
+              <select
+                value={editType}
+                onChange={(event) => setEditType(event.target.value)}
+                className="mt-2 w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-slate-800"
+              >
+                {Object.entries(TYPE_META).map(([value, meta]) => (
+                  <option key={value} value={value}>
+                    {meta.name}
+                  </option>
+                ))}
+                {!TYPE_META[editType] && <option value={editType}>{editType}</option>}
+              </select>
+              <textarea
+                value={editContent}
+                onChange={(event) => setEditContent(event.target.value)}
+                rows={7}
+                className="mt-2 w-full rounded-md border border-gray-300 bg-white p-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none"
+              />
               <p className="mt-1 text-xs text-gray-400">
                 状态 {selected.status} · 分支 {selected.branch_scope}
               </p>
-              <p className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap border-t border-gray-100 pt-2 text-sm text-gray-700">
-                {selected.content}
-              </p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={saveNode}
+                  disabled={busy}
+                  className="rounded-md bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  保存
+                </button>
+                <button
+                  onClick={deleteNode}
+                  disabled={busy}
+                  className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+                >
+                  删除节点
+                </button>
+              </div>
             </div>
           )}
 

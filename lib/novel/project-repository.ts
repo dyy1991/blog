@@ -376,6 +376,96 @@ export class ProjectRepository {
     });
   }
 
+  // 博客端扩展(MCP 仓库暂无):节点编辑
+  async updateNode(
+    projectId: string,
+    nodeId: string,
+    patch: { label?: string; content?: string; type?: string; status?: Node['status'] }
+  ): Promise<{ state: ProjectState; revision: Revision }> {
+    return this.lockFor(projectId).runExclusive(async () => {
+      const state = await this.read(projectId);
+      const index = state.nodes.findIndex((node) => node.node_id === nodeId);
+      if (index === -1) {
+        throw new Error(`Node not found: ${nodeId}`);
+      }
+      const existing = state.nodes[index];
+      const updated: Node = {
+        ...existing,
+        label: patch.label ?? existing.label,
+        content: patch.content ?? existing.content,
+        type: patch.type ?? existing.type,
+        status: patch.status ?? existing.status,
+        updated_at: nowIso()
+      };
+      state.nodes[index] = updated;
+
+      const branch = state.branches.find((item) => item.branch_id === existing.branch_scope)
+        ?? state.branches.find((item) => item.branch_id === state.active_branch_id);
+      const revision = RevisionSchema.parse({
+        revision_id: newId('rev'),
+        parent_revision_id: branch?.head_revision_id ?? null,
+        branch_id: branch?.branch_id ?? state.active_branch_id,
+        created_at: nowIso(),
+        created_by: 'user',
+        summary: `Update node ${updated.label}`,
+        delta: createDelta(`Update node ${updated.label}`, { nodes_updated: [nodeId] })
+      });
+      state.revisions.push(revision);
+      if (branch) {
+        branch.head_revision_id = revision.revision_id;
+        if (state.active_branch_id === branch.branch_id) {
+          state.current_revision_id = revision.revision_id;
+        }
+      }
+
+      await this.write(state);
+      return { state, revision };
+    });
+  }
+
+  // 博客端扩展(MCP 仓库暂无):删除节点及其关联边
+  async deleteNode(projectId: string, nodeId: string): Promise<{ state: ProjectState; revision: Revision }> {
+    return this.lockFor(projectId).runExclusive(async () => {
+      const state = await this.read(projectId);
+      const existing = state.nodes.find((node) => node.node_id === nodeId);
+      if (!existing) {
+        throw new Error(`Node not found: ${nodeId}`);
+      }
+
+      const removedEdges = state.edges
+        .filter((edge) => edge.from_node_id === nodeId || edge.to_node_id === nodeId)
+        .map((edge) => edge.edge_id);
+
+      state.nodes = state.nodes.filter((node) => node.node_id !== nodeId);
+      state.edges = state.edges.filter((edge) => edge.from_node_id !== nodeId && edge.to_node_id !== nodeId);
+
+      const branch = state.branches.find((item) => item.branch_id === existing.branch_scope)
+        ?? state.branches.find((item) => item.branch_id === state.active_branch_id);
+      const revision = RevisionSchema.parse({
+        revision_id: newId('rev'),
+        parent_revision_id: branch?.head_revision_id ?? null,
+        branch_id: branch?.branch_id ?? state.active_branch_id,
+        created_at: nowIso(),
+        created_by: 'user',
+        summary: `Delete node ${existing.label}`,
+        delta: createDelta(`Delete node ${existing.label}`, {
+          nodes_retired: [nodeId],
+          edges_retired: removedEdges
+        })
+      });
+      state.revisions.push(revision);
+      if (branch) {
+        branch.head_revision_id = revision.revision_id;
+        if (state.active_branch_id === branch.branch_id) {
+          state.current_revision_id = revision.revision_id;
+        }
+      }
+
+      await this.write(state);
+      return { state, revision };
+    });
+  }
+
   async diffRevisions(projectId: string, leftRevisionId: string, rightRevisionId: string): Promise<RevisionComparison> {
     const state = await this.read(projectId);
     const left = state.revisions.find((revision) => revision.revision_id === leftRevisionId);

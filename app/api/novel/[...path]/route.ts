@@ -190,7 +190,39 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ path: str
     if (path.length === 5 && path[0] === 'projects' && path[2] === 'branches' && path[4] === 'activate') {
       return NextResponse.json(await service.switchBranch(path[1], path[3]))
     }
+    // PATCH /api/novel/projects/:id/nodes/:nodeId
+    if (path.length === 4 && path[0] === 'projects' && path[2] === 'nodes') {
+      const body = await readBody(req)
+      const status = body.status
+      return NextResponse.json(
+        await service.updateNode(path[1], path[3], {
+          label: asOptionalString(body.label),
+          content: asOptionalString(body.content),
+          type: asOptionalString(body.type),
+          status:
+            status === 'confirmed' || status === 'provisional' || status === 'disputed' || status === 'retired'
+              ? status
+              : undefined
+        })
+      )
+    }
     return NextResponse.json({ error: { message: `Route not found: PATCH /${path.join('/')}` } }, { status: 404 })
+  } catch (error) {
+    return fail(error)
+  }
+}
+
+export async function DELETE(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+  if (!checkKey(req)) return unauthorized()
+  const { path } = await ctx.params
+  const service = getNovelService()
+
+  try {
+    // DELETE /api/novel/projects/:id/nodes/:nodeId
+    if (path.length === 4 && path[0] === 'projects' && path[2] === 'nodes') {
+      return NextResponse.json(await service.deleteNode(path[1], path[3]))
+    }
+    return NextResponse.json({ error: { message: `Route not found: DELETE /${path.join('/')}` } }, { status: 404 })
   } catch (error) {
     return fail(error)
   }

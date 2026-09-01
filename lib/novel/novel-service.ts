@@ -610,6 +610,33 @@ export class NovelService {
     };
   }
 
+  // 博客端扩展:节点编辑 / 删除
+  async updateNode(
+    projectId: string,
+    nodeId: string,
+    patch: { label?: string; content?: string; type?: string; status?: Node['status'] }
+  ): Promise<ToolResult> {
+    const saved = await this.repository.updateNode(projectId, nodeId, patch);
+    return toolResult({
+      projectId,
+      branchId: saved.revision.branch_id,
+      revisionId: saved.revision.revision_id,
+      summary: saved.revision.summary,
+      graphDelta: saved.revision.delta
+    });
+  }
+
+  async deleteNode(projectId: string, nodeId: string): Promise<ToolResult> {
+    const saved = await this.repository.deleteNode(projectId, nodeId);
+    return toolResult({
+      projectId,
+      branchId: saved.revision.branch_id,
+      revisionId: saved.revision.revision_id,
+      summary: saved.revision.summary,
+      graphDelta: saved.revision.delta
+    });
+  }
+
   async diffRevisions(projectId: string, leftRevisionId: string, rightRevisionId: string): Promise<{ project_id: string; branch_id: string; revision_id: string; status: 'ok'; summary: string; diff: RevisionComparison }> {
     const diff = await this.repository.diffRevisions(projectId, leftRevisionId, rightRevisionId);
     return {
