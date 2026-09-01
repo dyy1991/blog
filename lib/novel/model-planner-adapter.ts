@@ -1,5 +1,5 @@
 // Ported from novel-graph-agent src/planner/model-planner-adapter.ts
-import { ToolResultSchema, type ToolResult } from './story-types';
+import { DraftSchema, ToolResultSchema, type Draft, type ToolResult, type ToolStatus } from './story-types';
 import type {
   LanguageModelClient,
   ModelJsonRequest,
@@ -22,33 +22,112 @@ function projectContext(project: PlannerPlanRequest['project'], branchId: string
   });
 }
 
+const TOOL_STATUSES: ToolStatus[] = ['ok', 'needs_question', 'needs_review', 'error'];
+const DELTA_KEYS = [
+  'nodes_added',
+  'nodes_updated',
+  'nodes_retired',
+  'edges_added',
+  'edges_updated',
+  'edges_retired',
+  'branches_added',
+  'revisions_created'
+] as const;
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+// 模型返回的 JSON 不保证符合 schema(可能多字段、缺字段、状态词自创),
+// 这里做规范化,避免直接 zod.parse 抛错把整次调用打断。
+function normalizeGraphDelta(value: unknown): { delta: Record<string, unknown>; ignoredProposals: boolean } {
+  const record = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  const delta: Record<string, unknown> = {
+    summary: typeof record.summary === 'string' ? record.summary : 'Model planner did not apply a graph mutation.'
+  };
+  for (const key of DELTA_KEYS) {
+    delta[key] = stringArray(record[key]);
+  }
+  // 模型有时会塞入完整的 nodes/edges 对象数组;当前不自动写图,仅提示
+  const ignoredProposals = Array.isArray(record.nodes) || Array.isArray(record.edges);
+  return { delta, ignoredProposals };
+}
+
+function normalizeDraft(
+  value: unknown,
+  project: PlannerPlanRequest['project'],
+  branchId: string,
+  fallbackKind: Draft['kind']
+): Draft | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const content =
+    typeof record.content === 'string'
+      ? record.content
+      : typeof record.text === 'string'
+        ? record.text
+        : typeof record.body === 'string'
+          ? record.body
+          : '';
+  if (!content.trim()) {
+    return null;
+  }
+  const kind = record.kind;
+  const timestamp = new Date().toISOString();
+  return DraftSchema.parse({
+    draft_id: typeof record.draft_id === 'string' ? record.draft_id : `draft_${Date.now().toString(36)}`,
+    project_id: project.project_id,
+    branch_id: branchId,
+    revision_id: project.current_revision_id,
+    kind: kind === 'outline' || kind === 'scene' || kind === 'dialogue' || kind === 'summary' ? kind : fallbackKind,
+    title: typeof record.title === 'string' && record.title.trim() ? record.title : `${project.title} ${fallbackKind}`,
+    content,
+    status: 'draft',
+    created_at: timestamp,
+    updated_at: timestamp
+  });
+}
+
+function stringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  const result: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof item === 'string') {
+      result[key] = item;
+    }
+  }
+  return result;
+}
+
 function baseResult(
   project: PlannerPlanRequest['project'],
   branchId: string,
-  output: unknown
+  output: unknown,
+  fallbackKind: Draft['kind'] = 'scene'
 ): ToolResult {
-  const candidate = output && typeof output === 'object' ? (output as Record<string, unknown>) : {};
+  const candidate = output && typeof output === 'object' && !Array.isArray(output) ? (output as Record<string, unknown>) : {};
+  const { delta, ignoredProposals } = normalizeGraphDelta(candidate.graph_delta);
+  const warnings = stringArray(candidate.warnings);
+  if (ignoredProposals) {
+    warnings.push('模型返回了节点/关系提案,当前版本未自动写入图谱,请按建议手动补充。');
+  }
+
+  const status = candidate.status;
   return ToolResultSchema.parse({
     project_id: project.project_id,
     branch_id: branchId,
     revision_id: project.current_revision_id,
-    status: typeof candidate.status === 'string' ? candidate.status : 'ok',
+    status: typeof status === 'string' && TOOL_STATUSES.includes(status as ToolStatus) ? status : 'ok',
     summary: typeof candidate.summary === 'string' ? candidate.summary : 'Model planner completed.',
-    graph_delta: candidate.graph_delta ?? {
-      summary: 'Model planner did not apply a graph mutation.',
-      nodes_added: [],
-      nodes_updated: [],
-      nodes_retired: [],
-      edges_added: [],
-      edges_updated: [],
-      edges_retired: [],
-      branches_added: [],
-      revisions_created: []
-    },
-    next_question: candidate.next_question ?? null,
-    draft: candidate.draft ?? null,
-    exports: candidate.exports ?? {},
-    warnings: Array.isArray(candidate.warnings) ? candidate.warnings : []
+    graph_delta: delta,
+    next_question: typeof candidate.next_question === 'string' ? candidate.next_question : null,
+    draft: normalizeDraft(candidate.draft, project, branchId, fallbackKind),
+    exports: stringRecord(candidate.exports),
+    warnings
   });
 }
 
@@ -80,7 +159,8 @@ export class ModelPlannerAdapter implements PlannerAdapter {
         .filter(Boolean)
         .join('\n\n'),
       response_shape:
-        '{status, summary, graph_delta, next_question, draft, exports, warnings}; do not invent project_id, branch_id, or revision_id'
+        'Return JSON: {"status":"ok"|"needs_question","summary":"<一句话说明当前进度或建议>","next_question":"<给作者的下一个关键问题>","warnings":[]}. ' +
+        '不要返回 project_id / branch_id / revision_id,不要在 graph_delta 里放节点对象。'
     };
     const output = await this.client.completeJson(modelRequest);
     return baseResult(request.project, request.branchId, output);
@@ -98,9 +178,11 @@ export class ModelPlannerAdapter implements PlannerAdapter {
         .filter(Boolean)
         .join('\n\n'),
       response_shape:
-        '{status, summary, graph_delta, next_question, draft, exports, warnings}; draft must be a structured Draft object'
+        'Return JSON: {"status":"ok","summary":"<一句话说明>","next_question":null,"draft":{"kind":"' +
+        request.kind +
+        '","title":"<标题>","content":"<正文>"},"warnings":[]}. graph_delta 可省略。draft.content 必须是完整正文字符串。'
     };
     const output = await this.client.completeJson(modelRequest);
-    return baseResult(request.project, request.branchId, output);
+    return baseResult(request.project, request.branchId, output, request.kind);
   }
 }

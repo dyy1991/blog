@@ -514,7 +514,7 @@ export default function NovelStudioPage() {
       </div>
 
       {message && <p className="mt-2 text-sm text-red-500">{message}</p>}
-      {busy && <p className="mt-2 text-sm text-gray-400">处理中…</p>}
+      {busy && <p className="mt-2 text-sm text-gray-400">处理中…(模型生成可能需要 10-60 秒)</p>}
 
       <div className="mt-4 flex flex-col gap-4 lg:flex-row">
         <div className="h-[calc(100vh-16rem)] min-h-[520px] flex-1 overflow-hidden rounded-xl border border-gray-200 bg-white">

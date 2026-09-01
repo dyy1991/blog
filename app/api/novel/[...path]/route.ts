@@ -6,6 +6,7 @@ import type { ExportFormat, ImportFormat } from '@/lib/novel/novel-service'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 300 // 模型生成草稿可能较慢
 
 type Body = Record<string, unknown>
 
