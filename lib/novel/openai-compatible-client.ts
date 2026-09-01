@@ -155,8 +155,9 @@ export class OpenAICompatibleLanguageModelClient implements LanguageModelClient 
             }
           };
 
+    const requestUrl = `${this.baseUrl}${this.endpoint === 'responses' ? '/responses' : '/chat/completions'}`;
     const response = await this.fetchFn(
-      `${this.baseUrl}${this.endpoint === 'responses' ? '/responses' : '/chat/completions'}`,
+      requestUrl,
       {
         method: 'POST',
         headers: {
@@ -170,7 +171,9 @@ export class OpenAICompatibleLanguageModelClient implements LanguageModelClient 
 
     if (!response.ok) {
       const errorBody = await readErrorBody(response);
-      throw new Error(`Model request failed with ${response.status}: ${errorBody || response.statusText}`);
+      throw new Error(
+        `Model request failed with ${response.status} at ${requestUrl} (model=${this.model}): ${errorBody || response.statusText}`
+      );
     }
 
     const payload = (await response.json()) as unknown;

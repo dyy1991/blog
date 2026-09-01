@@ -181,6 +181,76 @@ function inferNodeType(text: string): string {
   return 'intake';
 }
 
+interface IntakeSection {
+  title: string
+  body: string
+  bullets: string[]
+}
+
+// 把长文本按 Markdown 标题 / 空行段落 / 列表切成若干片段,
+// 每个片段成为一个图谱节点(标题片段为父节点,其下条目为子节点)。
+function splitIntakeSections(text: string): IntakeSection[] {
+  const lines = text.split(/\r?\n/);
+  const sections: IntakeSection[] = [];
+  let current: IntakeSection | null = null;
+  let looseParagraph: string[] = [];
+
+  const flushLoose = () => {
+    const body = looseParagraph.join('\n').trim();
+    looseParagraph = [];
+    if (!body) return;
+    if (current) {
+      current.body = current.body ? `${current.body}\n${body}` : body;
+    } else {
+      sections.push({ title: labelFromText(body), body, bullets: [] });
+    }
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      flushLoose();
+      current = { title: heading[2].trim(), body: '', bullets: [] };
+      sections.push(current);
+      continue;
+    }
+
+    const bullet = line.match(/^(?:[-*+]\s+|\d+[.)]\s+)(.+)$/);
+    if (bullet) {
+      flushLoose();
+      const item = bullet[1].trim();
+      if (current) {
+        current.bullets.push(item);
+      } else {
+        sections.push({ title: labelFromText(item), body: item, bullets: [] });
+      }
+      continue;
+    }
+
+    if (!line) {
+      flushLoose();
+      continue;
+    }
+
+    // 「标签：内容」单独成节,如「世界观：...」
+    const labelled = line.match(
+      /^(世界观|设定|背景|角色|人物|主线|剧情|分支|章节|场景|冲突|目标|主题|人物关系|关系网)\s*[：:]\s*(.+)$/
+    );
+    if (labelled) {
+      flushLoose();
+      current = { title: labelled[1], body: labelled[2].trim(), bullets: [] };
+      sections.push(current);
+      continue;
+    }
+
+    looseParagraph.push(line);
+  }
+  flushLoose();
+
+  return sections.filter((section) => section.title || section.body || section.bullets.length > 0);
+}
+
 function buildIntakeNode(projectId: string, branchId: string, text: string, sourceUri?: string): Node {
   const timestamp = nowIso();
   return {
@@ -311,16 +381,76 @@ export class NovelService {
       branchId,
       text: input.input.text
     });
-    const node = buildIntakeNode(input.project_id, branchId, input.input.text.trim(), input.input.source_uri);
+    const text = input.input.text.trim();
+    const sections = splitIntakeSections(text);
+    const timestamp = nowIso();
+    const nodes: Node[] = [];
+    const edges: ProjectState['edges'] = [];
+
+    // 单一片段(短输入)沿用原逻辑:整段一个节点
+    if (sections.length <= 1) {
+      nodes.push(buildIntakeNode(input.project_id, branchId, text, input.input.source_uri));
+    } else {
+      for (const section of sections) {
+        const sectionText = [section.title, section.body].filter(Boolean).join('\n');
+        const parent: Node = {
+          node_id: stableId('node', input.project_id, branchId, section.title, section.body),
+          type: inferNodeType(sectionText),
+          label: section.title || labelFromText(section.body),
+          content: section.body || section.title,
+          status: 'provisional',
+          branch_scope: branchId,
+          source_refs: input.input.source_uri ? [{ kind: 'input', uri: input.input.source_uri }] : [],
+          tags: ['intake'],
+          created_at: timestamp,
+          updated_at: timestamp
+        };
+        nodes.push(parent);
+
+        for (const bullet of section.bullets) {
+          const child: Node = {
+            node_id: stableId('node', input.project_id, branchId, section.title, bullet),
+            type: inferNodeType(`${section.title} ${bullet}`),
+            label: labelFromText(bullet),
+            content: bullet,
+            status: 'provisional',
+            branch_scope: branchId,
+            source_refs: [],
+            tags: ['intake'],
+            created_at: timestamp,
+            updated_at: timestamp
+          };
+          nodes.push(child);
+          edges.push({
+            edge_id: stableId('edge', parent.node_id, child.node_id),
+            type: 'contains',
+            from_node_id: parent.node_id,
+            to_node_id: child.node_id,
+            label: '',
+            status: 'provisional',
+            source_refs: []
+          });
+        }
+      }
+    }
+
     const saved = await this.repository.upsertNodesAndEdges(input.project_id, {
       branchId,
-      summary: `Ingest intake: ${node.label}`,
+      summary:
+        nodes.length > 1
+          ? `Ingest intake: ${nodes.length} 个节点(${sections.length} 个片段)`
+          : `Ingest intake: ${nodes[0].label}`,
       createdBy: 'user',
-      nodes: [node]
+      nodes,
+      edges
     });
     return ToolResultSchema.parse({
       ...analysis,
       revision_id: saved.revision.revision_id,
+      summary:
+        nodes.length > 1
+          ? `已解析为 ${nodes.length} 个节点(${sections.length} 个片段)。${analysis.summary}`
+          : analysis.summary,
       graph_delta: saved.revision.delta
     });
   }

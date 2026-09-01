@@ -605,17 +605,28 @@ export default function NovelStudioPage() {
 
         <div className="w-full space-y-4 lg:w-96">
           {selected && (
-            <div className="rounded-xl border border-gray-200 bg-white p-4 text-slate-800">
-              <div className="flex items-center justify-between">
-                <h2 className="font-semibold">{selected.label}</h2>
-                <button onClick={() => setSelected(null)} className="text-sm text-gray-400 hover:text-gray-600">
+            <div className="rounded-xl border border-blue-300 bg-white p-4 text-slate-800">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="inline-block rounded px-1.5 py-0.5 text-xs text-white"
+                    style={{ backgroundColor: typeMeta(selected.type).color }}
+                  >
+                    {typeMeta(selected.type).name}
+                  </span>
+                  <h2 className="text-sm font-semibold text-gray-500">节点详情</h2>
+                </div>
+                <button onClick={() => setSelected(null)} className="shrink-0 text-sm text-gray-400 hover:text-gray-600">
                   关闭
                 </button>
               </div>
+              <p className="mt-2 font-semibold leading-snug">{selected.label}</p>
               <p className="mt-1 text-xs text-gray-400">
-                {typeMeta(selected.type).name} · {selected.status} · {selected.branch_scope}
+                状态 {selected.status} · 分支 {selected.branch_scope}
               </p>
-              <p className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-sm text-gray-700">{selected.content}</p>
+              <p className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap border-t border-gray-100 pt-2 text-sm text-gray-700">
+                {selected.content}
+              </p>
             </div>
           )}
 
