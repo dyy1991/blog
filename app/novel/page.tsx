@@ -183,18 +183,17 @@ export default function NovelStudioPage() {
 
   useEffect(() => {
     const saved = window.localStorage.getItem('novel-access-key')
-    if (saved) {
-      setKey(saved)
-      loadProjects(saved)
-        .then((list) => {
-          setAuthed(true)
-          if (list.length > 0) {
-            setProjectId(list[0].project_id)
-            return loadGraph(saved, list[0].project_id)
-          }
-        })
-        .catch(() => window.localStorage.removeItem('novel-access-key'))
-    }
+    if (!saved) return
+    loadProjects(saved)
+      .then((list) => {
+        setKey(saved)
+        setAuthed(true)
+        if (list.length > 0) {
+          setProjectId(list[0].project_id)
+          return loadGraph(saved, list[0].project_id)
+        }
+      })
+      .catch(() => window.localStorage.removeItem('novel-access-key'))
   }, [loadProjects, loadGraph])
 
   const unlock = async () => {

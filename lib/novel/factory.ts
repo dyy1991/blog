@@ -98,7 +98,6 @@ interface NovelRuntime {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __novelRuntime: NovelRuntime | undefined;
 }
 
