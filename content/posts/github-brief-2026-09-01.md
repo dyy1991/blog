@@ -3,78 +3,83 @@ title: "每日 GitHub 开源速报 · 2026-09-01"
 date: "2026-09-01"
 category: "github-brief"
 tags: ["GitHub", "开源", "AI", "LLM", "Agent"]
-excerpt: "近期新晋/高热高 star 项目 Top 5:superpowers、ai-agent-book、ai-job-search、OmniRoute、needle。AI 竞争重心从模型转向脚手架,双智能体「起草—评审」范式走向成熟。"
+excerpt: "当前高热 AI 项目 Top 5:OpenClaw、Dify、Langflow、Strix、Bumblebee。本地优先与自托管成为默认姿势,AI 安全工具进入 DevSecOps 主战场。"
 ---
 
 # 每日 GitHub 开源速报 · 2026-09-01
 
-> 关键词:AI / LLM / Agent · 范围:近期新晋/高热高 star 项目 · Top 5
+> 关键词:AI / LLM / Agent · 范围:当前高热 / 快速上升项目 · Top 5
 
 ---
 
-## 1. [obra/superpowers](https://github.com/obra/superpowers) ⭐ 265,800
+## 1. [openclaw/openclaw](https://github.com/openclaw/openclaw) ⭐ ~382,000
 
-**Superpowers — 让 Coding Agent 像纪律严明的工程师工作的技能框架**
+**OpenClaw — 跑在你自己机器上的自托管个人 AI 助手 🦞**
 
-`Shell / Markdown` · Fork 13,000+ · 近期持续高热 · Agent Skills 框架
+`TypeScript` / `Swift` · MIT · 2026 年现象级项目
 
-Jesse Vincent 的开源「智能体技能框架 + 软件工程方法论」。它不是又一个模型,而是一整套指令、Skill 与工作流触发器,让 Claude Code 等编码智能体按 TDD、代码评审、任务分解等既定「工程动作」自我约束,而非像急躁的实习生一样瞎写。技能以可组合的 SKILL.md 形式提供,智能体在合适时机自行调用。
+自托管、开源的个人 AI agent:核心 Gateway 采用插件架构,原生对接 WhatsApp、Telegram、Signal、Discord、Slack 等 50+ 消息平台与工具,支持多家 LLM 提供商,数据不经过任何厂商托管 API,全部留在本地。从年初约 9,000 star 一路飙到 38 万+,是 2026 年增长最快的开源项目之一,创始人加入 OpenAI 后还拿到了 Sam Altman 的公开背书。
 
-**看点**:把「工程规范」而非「更强模型」当作生产力核心,正契合 CI/CD 强调的流程纪律;对 DevOps 学习者而言,它示范了如何用可复用 Skill 把「先写测试、再改代码、再评审」固化进 agent 流水线。
-
----
-
-## 2. [bojieli/ai-agent-book](https://github.com/bojieli/ai-agent-book) ⭐ 42,983
-
-**《深入理解 AI Agent:设计原理与工程实践》(李博杰 著)**
-
-`Python` · 全书正文 + 编译版 PDF + 按章配套代码 · 开源教材
-
-系统性中文 AI Agent 教材的开源主仓库,把智能体基础架构抽象为 `Agent = LLM + Context + Tools`,分 10 章、90+ 动手实验项目讲透设计原理与工程落地。每章配可运行代码,从上下文管理、工具调用到多智能体协作循序渐进。
-
-**看点**:少见的成体系中文 Agent 工程教材;对想把 Agent 引入运维/流水线的 DevOps 学习者,是补齐「原理 + 可复现实验」的高质量参考,而非碎片化博客。
+**看点**:「本地优先 + 数据不出机」是今年 agent 赛道的主旋律;对 DevOps 而言,它本质上是一个可自托管、可插件扩展的事件网关,自建 homelab / 内网自动化很值得借鉴其部署形态。
 
 ---
 
-## 3. [MadsLorentzen/ai-job-search](https://github.com/MadsLorentzen/ai-job-search) ⭐ 38,755
+## 2. [langgenius/dify](https://github.com/langgenius/dify) ⭐ ~142,000
 
-**AI Job Search — 跑在本地、基于 Claude Code 的求职应用框架**
+**Dify — 生产级 Agentic 工作流 / RAG 平台**
 
-`Markdown / Shell` · Fork 数千 · 曾登 GitHub Trending #1 · 本地优先
+`TypeScript` / `Python` · Fork ~22,000 · Dify Open Source License(基于 Apache-2.0 附加限制)
 
-构建于 Claude Code 之上的求职自动化框架:评估岗位、按 JD 定制 CV、写求职信、准备面试。核心是「drafter-reviewer」双智能体架构——drafter 起草,第二个以全新上下文启动的智能体去调研公司并批评草稿,drafter 再修订,从而捕捉遗漏关键词、空泛措辞。整套流程在本机运行,语言与国家无关。作者本人靠它实现了 69 份投递 → 20 场面试 → 1 个 offer。
+开源 LLM 应用开发平台,把 AI workflow、RAG pipeline、agent 能力、模型管理、可观测性整合进一个协作式工作台,让团队从原型直接走到生产而无需重搭技术栈。支持云、VPC、自托管多种部署方式,累计 160+ release,是同类中 star 最高的项目之一。
 
-**看点**:双智能体「起草—评审」范式是极好的工程模板——同样思路可迁移到 CI 里的「AI 改代码 + AI 复核 diff」,用一个独立上下文的 reviewer 提高自动化产出的可信度。
-
----
-
-## 4. [diegosouzapw/OmniRoute](https://github.com/diegosouzapw/OmniRoute) ⭐ 33,908
-
-**OmniRoute — 统一 290+ 提供方的本地 AI 网关**
-
-`TypeScript` · Fork 4,372 · MIT · 本地自托管
-
-MIT 许可、自托管的高性能 AI 网关,把 290+ 家 LLM 提供方、90+ 免费提供方、数百个模型统一到单一 OpenAI 兼容端点。当某个提供方触达配额或不可用时自动路由到最佳可用方,免去手工切换。兼容 Claude Code、Codex CLI、Cursor、Cline、Aider、Copilot CLI 等一众工具。
-
-**看点**:典型的「一层网关抽象掉后端异构性」设计,与 DevOps 的服务网关/故障转移思路一脉相承;自托管 + OpenAI 兼容端点便于接入内网流水线。注意:近期有安全评测指出其「免费 token」宣传及潜在 CVE 风险,生产接入前需审计。
+**看点**:「Deploy on cloud, VPC, or self-hosted」正中企业内网合规诉求;其内置 observability 与一键部署链路,对想把 LLM 应用纳入现有 CI/CD 与 K8s 体系的团队最省心。
 
 ---
 
-## 5. [cactus-compute/needle](https://github.com/cactus-compute/needle) ⭐ 5,800
+## 3. [langflow-ai/langflow](https://github.com/langflow-ai/langflow) ⭐ ~149,000
 
-**Needle — 14MB 的端侧基础模型,面向手机 / 穿戴 / 智能家居 / 机器人**
+**Langflow — 低代码可视化 Agent / RAG 构建器**
 
-`Python` · MIT 权重(HuggingFace)· PyPI: cactus-needle · 近期发布 Needle 2
+`Python`(FastAPI 后端 + React Flow 前端) · Fork ~3,200 · MIT
 
-极小体积基础模型:整模型是单个 14MB 二进制,约 45M 参数,一次完整会话仅需约 28MB 内存,推理全程无网络。基于 Simple Attention Network,经 Cactus Quants 压到 CQ2-bit 并烘焙进自研引擎;专为工具调用、设备操作与结构化抽取设计。`pip install cactus-needle`,描述工具即可从 Python 调用。
+开源低代码可视化构建器,用拖拽方式搭建 AI agent、RAG pipeline 与 LangChain 工作流;2023 年至今 PyPI 累计下载超千万,活跃贡献者约 280。项目已随 DataStax 并入 IBM,但仍保持 MIT 开源。
 
-**看点**:边缘 AI 的极致轻量化路线,对「无 GPU、离线、受限硬件」场景意义重大;从部署视角看,单二进制、零外部模型文件极大简化了 CI 打包与端侧分发。
+**看点**:可视化编排降低了 agent 搭建门槛;后端 FastAPI + 前端 React Flow 的分层设计,便于容器化打包进流水线做团队内自助式 AI 平台。
+
+---
+
+## 4. [usestrix/strix](https://github.com/usestrix/strix) ⭐ ~46,000
+
+**Strix — 开源自主 AI 渗透测试 / 安全 Agent**
+
+`Python` · Fork ~4,800 · Apache-2.0
+
+agentic 安全平台:AI agent 端到端地规划、探查、验证漏洞与安全配置错误,产出可直接修复的 actionable findings,覆盖现代应用的可利用漏洞面。定位是「会自己动手验证」的安全 agent,而非只给建议的扫描器。
+
+**看点**:与你的 DevSecOps 方向高度契合——把这类 agent 接进 CI 做 PR 级安全门禁,是「安全左移」的现实落地路径;但自动化渗透务必限定在自有资产与授权范围内。
+
+---
+
+## 5. [perplexityai/bumblebee](https://github.com/perplexityai/bumblebee) ⭐ ~4,800
+
+**Bumblebee — Perplexity 开源的只读供应链暴露扫描器**
+
+`Go`(零非标准库依赖) · Apache-2.0 · 2026 年 5 月开源
+
+面向开发者终端的只读供应链扫描器:读取本机 lockfile、包管理器元数据、编辑器/浏览器扩展清单、MCP 配置等磁盘状态,检查是否暴露于已知的软件供应链投毒事件。回答的是应急响应里那句「到底哪些机器装了被投毒的包」。覆盖 npm、PyPI、Go modules、RubyGems、Composer、MCP server 及各类扩展。
+
+**看点**:纯 Go、零第三方依赖、只读不改动,天然适合塞进 CI runner 或终端基线巡检做供应链风险清点;是本期 5 个项目中「最新」的一个。
 
 ---
 
 ## 今日趋势小结
 
-本期三条主线:**① AI 的竞争重心从「模型」转向「脚手架」**——Superpowers、ai-agent-book 都在解决「如何让已足够强的 agent 变得可靠、有纪律」,技能(Skill)、方法论、流程护栏成为主战场;**② 双/多智能体协作范式走向成熟**——ai-job-search 的「drafter-reviewer」把「独立上下文复核」变成标准动作,是自动化产出可信度的关键;**③ 两端分化**——一端是 OmniRoute 式的网关/编排层聚合上游能力,另一端是 Needle 式的端侧极限压缩把 AI 塞进 14MB。对 DevOps 方向,最值得细读的是 Superpowers 的流程固化思路与 ai-job-search 的 reviewer 模式,二者都能直接映射到「AI 参与的 CI/CD 流水线」如何保证质量。
+- **本地优先与自托管成为默认姿势**:OpenClaw、Dify 都把「数据留在本地 / 可 VPC 自托管」作为核心卖点,回应企业内网与合规诉求。
+- **AI 安全工具进入 DevSecOps 主战场**:Strix(自主渗透)与 Bumblebee(供应链扫描)代表 agent 从「写代码」延伸到「保代码」,都天然适配 CI/CD 门禁场景。
+- **可视化编排持续降低门槛**:Langflow、Dify 的低代码/可视化范式,让把 LLM 应用纳入现有流水线与 K8s 体系变得更平滑。
 
 ---
-*数据来源:GitHub Trending / 公开资料聚合(本次 GitHub Search API 直连不可用,元数据经多源检索交叉核对,star 数为检索时点近似值)· 本文由每日定时任务自动生成*
+*数据来源:公开 WebSearch 聚合(GitHub Search API 与 web_fetch 在本次沙盒环境不可直连)· star/fork 数为近似值(~)· 「近 7 天创建」过滤条件本次无法直接校验,故本期以「当前高热 / 快速上升项目」口径选取 · 生成时间:2026-09-01*
+
+---
+*本文由每日定时任务自动生成。*
