@@ -196,15 +196,20 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ path: str
       const body = await readBody(req)
       const status = body.status
       return NextResponse.json(
-        await service.updateNode(path[1], path[3], {
-          label: asOptionalString(body.label),
-          content: asOptionalString(body.content),
-          type: asOptionalString(body.type),
-          status:
-            status === 'confirmed' || status === 'provisional' || status === 'disputed' || status === 'retired'
-              ? status
-              : undefined
-        })
+        await service.updateNode(
+          path[1],
+          path[3],
+          {
+            label: asOptionalString(body.label),
+            content: asOptionalString(body.content),
+            type: asOptionalString(body.type),
+            status:
+              status === 'confirmed' || status === 'provisional' || status === 'disputed' || status === 'retired'
+                ? status
+                : undefined
+          },
+          asOptionalString(body.branch_id)
+        )
       )
     }
     return NextResponse.json({ error: { message: `Route not found: PATCH /${path.join('/')}` } }, { status: 404 })
@@ -217,11 +222,12 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ path: st
   if (!checkKey(req)) return unauthorized()
   const { path } = await ctx.params
   const service = getNovelService()
+  const branchParam = new URL(req.url).searchParams.get('branch_id') ?? undefined
 
   try {
-    // DELETE /api/novel/projects/:id/nodes/:nodeId
+    // DELETE /api/novel/projects/:id/nodes/:nodeId?branch_id=
     if (path.length === 4 && path[0] === 'projects' && path[2] === 'nodes') {
-      return NextResponse.json(await service.deleteNode(path[1], path[3]))
+      return NextResponse.json(await service.deleteNode(path[1], path[3], branchParam))
     }
     return NextResponse.json({ error: { message: `Route not found: DELETE /${path.join('/')}` } }, { status: 404 })
   } catch (error) {

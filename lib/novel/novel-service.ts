@@ -9,7 +9,13 @@ import {
   importCanonicalJson,
   importOpml
 } from './import-export';
-import { ProjectRepository, type ProjectSummary, type RevisionComparison } from './project-repository';
+import {
+  ProjectRepository,
+  branchChain,
+  resolveNodesForBranch,
+  type ProjectSummary,
+  type RevisionComparison
+} from './project-repository';
 import {
   GraphDeltaSchema,
   ToolResultSchema,
@@ -91,6 +97,10 @@ export interface GraphProjection {
   branches: Branch[];
   nodes: Node[];
   edges: ProjectState['edges'];
+  /** 当前分支的祖先链 [自身, 父, ...],用于展示分叉来源 */
+  branch_chain: string[];
+  /** 在当前分支被覆写(写时复制)的节点 id */
+  overridden_node_ids: string[];
 }
 
 function nowIso(): string {
@@ -332,10 +342,13 @@ function projectForBranch(state: ProjectState, branchId: string): ProjectState {
   if (!branch) {
     throw new Error(`Branch not found: ${branchId}`);
   }
+  // planner 按 branch_scope 过滤,这里把继承来的节点重贴到当前分支(只读投影)
+  const { nodes } = resolveNodesForBranch(state, branchId);
   return {
     ...state,
     active_branch_id: branch.branch_id,
-    current_revision_id: branch.head_revision_id
+    current_revision_id: branch.head_revision_id,
+    nodes: nodes.map((node) => (node.branch_scope === branchId ? node : { ...node, branch_scope: branchId }))
   };
 }
 
@@ -593,19 +606,26 @@ export class NovelService {
   async getGraph(projectId: string, branchId?: string): Promise<{ project_id: string; branch_id: string; revision_id: string; status: 'ok'; summary: string; graph: GraphProjection }> {
     const state = await this.repository.getProject(projectId);
     const activeBranchId = branchId ?? state.active_branch_id;
-    const nodes = state.nodes.filter((node) => node.branch_scope === activeBranchId || node.branch_scope === 'global');
+    const { nodes, overriddenNodeIds } = resolveNodesForBranch(state, activeBranchId);
     const nodeIds = new Set(nodes.map((node) => node.node_id));
     const edges = state.edges.filter((edge) => nodeIds.has(edge.from_node_id) && nodeIds.has(edge.to_node_id));
+    const chain = branchChain(state, activeBranchId);
+    const inheritedCount = nodes.filter((node) => node.branch_scope !== activeBranchId).length;
     return {
       project_id: state.project_id,
       branch_id: activeBranchId,
       revision_id: state.current_revision_id,
       status: 'ok',
-      summary: `Loaded graph for branch ${activeBranchId}.`,
+      summary:
+        chain.length > 1
+          ? `分支 ${activeBranchId}:${nodes.length} 个节点(其中 ${inheritedCount} 个继承自 ${chain.slice(1).join(' → ')})。`
+          : `分支 ${activeBranchId}:${nodes.length} 个节点。`,
       graph: {
         branches: state.branches,
         nodes,
-        edges
+        edges,
+        branch_chain: chain,
+        overridden_node_ids: overriddenNodeIds
       }
     };
   }
@@ -614,26 +634,37 @@ export class NovelService {
   async updateNode(
     projectId: string,
     nodeId: string,
-    patch: { label?: string; content?: string; type?: string; status?: Node['status'] }
+    patch: { label?: string; content?: string; type?: string; status?: Node['status'] },
+    branchId?: string
   ): Promise<ToolResult> {
-    const saved = await this.repository.updateNode(projectId, nodeId, patch);
+    const state = await this.repository.getProject(projectId);
+    const targetBranch = branchId ?? state.active_branch_id;
+    const saved = await this.repository.updateNode(projectId, targetBranch, nodeId, patch);
     return toolResult({
       projectId,
       branchId: saved.revision.branch_id,
       revisionId: saved.revision.revision_id,
       summary: saved.revision.summary,
-      graphDelta: saved.revision.delta
+      graphDelta: saved.revision.delta,
+      warnings: saved.copied
+        ? [`该节点继承自父分支,已在分支 ${targetBranch} 生成独立副本,父分支不受影响。`]
+        : []
     });
   }
 
-  async deleteNode(projectId: string, nodeId: string): Promise<ToolResult> {
-    const saved = await this.repository.deleteNode(projectId, nodeId);
+  async deleteNode(projectId: string, nodeId: string, branchId?: string): Promise<ToolResult> {
+    const state = await this.repository.getProject(projectId);
+    const targetBranch = branchId ?? state.active_branch_id;
+    const saved = await this.repository.deleteNode(projectId, targetBranch, nodeId);
     return toolResult({
       projectId,
       branchId: saved.revision.branch_id,
       revisionId: saved.revision.revision_id,
       summary: saved.revision.summary,
-      graphDelta: saved.revision.delta
+      graphDelta: saved.revision.delta,
+      warnings: saved.tombstoned
+        ? [`该节点继承自父分支,已在分支 ${targetBranch} 隐藏,父分支仍保留。`]
+        : []
     });
   }
 

@@ -26,6 +26,7 @@ interface BranchT {
   name: string
   purpose: string
   status: string
+  parent_branch_id: string | null
 }
 
 interface ProjectSummaryT {
@@ -52,7 +53,14 @@ interface ToolResultT {
 
 interface GraphResponseT {
   branch_id: string
-  graph: { branches: BranchT[]; nodes: NodeT[]; edges: EdgeT[] }
+  summary?: string
+  graph: {
+    branches: BranchT[]
+    nodes: NodeT[]
+    edges: EdgeT[]
+    branch_chain?: string[]
+    overridden_node_ids?: string[]
+  }
 }
 
 const TYPE_META: Record<string, { name: string; color: string }> = {
@@ -336,7 +344,7 @@ export default function NovelStudioPage() {
       if (!selected) return
       await api(key, `projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(selected.node_id)}`, {
         method: 'PATCH',
-        body: JSON.stringify({ label: editLabel, content: editContent, type: editType })
+        body: JSON.stringify({ label: editLabel, content: editContent, type: editType, branch_id: branchId })
       })
       setSelected(null)
       await loadGraph(key, projectId, branchId)
@@ -345,10 +353,16 @@ export default function NovelStudioPage() {
   const deleteNode = () =>
     run(async () => {
       if (!selected) return
-      if (!window.confirm(`删除节点「${selected.label}」?关联的连线也会一并移除。`)) return
-      await api(key, `projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(selected.node_id)}`, {
-        method: 'DELETE'
-      })
+      const inherited = selected.branch_scope !== branchId
+      const confirmText = inherited
+        ? `「${selected.label}」继承自分支 ${selected.branch_scope}。将只在当前分支 ${branchId} 隐藏它,父分支保持不变。继续?`
+        : `删除节点「${selected.label}」?关联的连线也会一并移除。`
+      if (!window.confirm(confirmText)) return
+      await api(
+        key,
+        `projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(selected.node_id)}?branch_id=${encodeURIComponent(branchId)}`,
+        { method: 'DELETE' }
+      )
       setSelected(null)
       await loadGraph(key, projectId, branchId)
     })
@@ -378,6 +392,11 @@ export default function NovelStudioPage() {
     const project = projects.find((item) => item.project_id === projectId)
     return layoutMindmap(project?.title ?? projectId, graph.graph.nodes)
   }, [graph, projects, projectId])
+
+  const overriddenIds = useMemo(
+    () => new Set(graph?.graph.overridden_node_ids ?? []),
+    [graph]
+  )
 
   const nodePositions = useMemo(() => {
     const map = new Map<string, LaidNode>()
@@ -483,6 +502,11 @@ export default function NovelStudioPage() {
             <button onClick={createBranch} className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-slate-800 hover:bg-gray-100">
               + 分支
             </button>
+            {(graph.graph.branch_chain?.length ?? 0) > 1 && (
+              <span className="text-xs text-gray-400">
+                分叉自 {graph.graph.branch_chain!.slice(1).join(' → ')}
+              </span>
+            )}
             <div className="ml-auto flex items-center gap-2">
               <button onClick={() => setZoom((value) => Math.min(value * 1.2, 3))} className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-slate-800">
                 +
@@ -603,6 +627,8 @@ export default function NovelStudioPage() {
                   group.nodes.map((laid) => {
                     const meta = typeMeta(laid.node.type)
                     const isSelected = selected?.node_id === laid.node.node_id
+                    const isInherited = laid.node.branch_scope !== branchId
+                    const isOverridden = overriddenIds.has(laid.node.node_id)
                     return (
                       <g
                         key={laid.node.node_id}
@@ -615,10 +641,14 @@ export default function NovelStudioPage() {
                           width={NODE_W}
                           height={NODE_H}
                           rx={8}
-                          fill="#fff"
+                          fill={isInherited ? '#f8fafc' : '#fff'}
                           stroke={isSelected ? '#2563eb' : meta.color}
                           strokeWidth={isSelected ? 2.5 : 1.2}
+                          strokeDasharray={isInherited ? '4 3' : undefined}
                         />
+                        {isOverridden && (
+                          <circle cx={laid.x + NODE_W - 8} cy={laid.y + 8} r={3.5} fill="#2563eb" />
+                        )}
                         <circle cx={laid.x + 12} cy={laid.y + NODE_H / 2} r={4} fill={meta.color} />
                         <text x={laid.x + 24} y={laid.y + NODE_H / 2 + 4} fontSize={12} fill="#334155">
                           {laid.node.label.length > 11 ? `${laid.node.label.slice(0, 11)}…` : laid.node.label}
@@ -652,9 +682,15 @@ export default function NovelStudioPage() {
                   )
                 })}
               </div>
-              <p className="mt-2 border-t border-gray-100 pt-2 text-xs text-gray-400">
-                类型由输入文本自动判定,可在节点详情中修改;粉色虚线表示节点间的从属/关联关系。
-              </p>
+              <div className="mt-2 space-y-1 border-t border-gray-100 pt-2 text-xs text-gray-400">
+                <p>类型由输入文本自动判定,可在节点详情中修改;粉色虚线表示节点间的从属/关联关系。</p>
+                <p>
+                  <span className="mr-1 inline-block h-2.5 w-4 rounded-sm border border-dashed border-gray-400 bg-slate-50 align-middle" />
+                  虚线灰底 = 继承自父分支(改动会自动生成本分支副本)
+                  <span className="ml-2 mr-1 inline-block h-2 w-2 rounded-full bg-blue-600 align-middle" />
+                  = 本分支已覆写
+                </p>
+              </div>
             </div>
           )}
 
@@ -698,7 +734,11 @@ export default function NovelStudioPage() {
                 className="mt-2 w-full rounded-md border border-gray-300 bg-white p-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none"
               />
               <p className="mt-1 text-xs text-gray-400">
-                状态 {selected.status} · 分支 {selected.branch_scope}
+                状态 {selected.status} · 来源分支 {selected.branch_scope}
+                {selected.branch_scope !== branchId && (
+                  <span className="ml-1 text-amber-600">(继承,保存后将在 {branchId} 生成副本)</span>
+                )}
+                {overriddenIds.has(selected.node_id) && <span className="ml-1 text-blue-600">(本分支已覆写)</span>}
               </p>
               <div className="mt-2 flex gap-2">
                 <button
