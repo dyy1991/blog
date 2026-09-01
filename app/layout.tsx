@@ -13,6 +13,7 @@ const navLinks = [
   { href: '/write',   label: '~/write' },
   { href: '/support', label: '~/support' },
   { href: '/checkinWall', label: '~/checkin' },
+  { href: '/novel',   label: '~/novel' },
   { href: '/about',   label: '~/about' },
 ]
 

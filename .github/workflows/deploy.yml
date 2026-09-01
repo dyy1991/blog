@@ -118,6 +118,20 @@ jobs:
             cd /var/www/myblog
             echo "GITHUB_USER=${{ github.repository_owner }}" > .env
             echo "GITHUB_REPO=$(echo "${{ github.repository }}" | cut -d'/' -f2)" >> .env
+            # 小说工坊(/novel)配置:口令 + 可选模型密钥(GitHub Secrets)
+            echo "NOVEL_ACCESS_KEY=${{ secrets.NOVEL_ACCESS_KEY }}" >> .env
+            echo "NOVEL_LLM_BASE_URL=${{ secrets.NOVEL_LLM_BASE_URL }}" >> .env
+            echo "NOVEL_LLM_API_KEY=${{ secrets.NOVEL_LLM_API_KEY }}" >> .env
+            echo "NOVEL_LLM_MODEL=${{ secrets.NOVEL_LLM_MODEL }}" >> .env
+            echo "NOVEL_LLM_ENDPOINT=${{ secrets.NOVEL_LLM_ENDPOINT }}" >> .env
+            echo "NOVEL_LLM_PLAN_MODEL=${{ secrets.NOVEL_LLM_PLAN_MODEL }}" >> .env
+            echo "NOVEL_LLM_PLAN_BASE_URL=${{ secrets.NOVEL_LLM_PLAN_BASE_URL }}" >> .env
+            echo "NOVEL_LLM_PLAN_API_KEY=${{ secrets.NOVEL_LLM_PLAN_API_KEY }}" >> .env
+            echo "NOVEL_LLM_PLAN_ENDPOINT=${{ secrets.NOVEL_LLM_PLAN_ENDPOINT }}" >> .env
+            echo "NOVEL_LLM_WRITE_MODEL=${{ secrets.NOVEL_LLM_WRITE_MODEL }}" >> .env
+            echo "NOVEL_LLM_WRITE_BASE_URL=${{ secrets.NOVEL_LLM_WRITE_BASE_URL }}" >> .env
+            echo "NOVEL_LLM_WRITE_API_KEY=${{ secrets.NOVEL_LLM_WRITE_API_KEY }}" >> .env
+            echo "NOVEL_LLM_WRITE_ENDPOINT=${{ secrets.NOVEL_LLM_WRITE_ENDPOINT }}" >> .env
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker compose pull app
             docker compose up -d --remove-orphans

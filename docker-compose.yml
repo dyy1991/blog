@@ -7,6 +7,21 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=file:/data/support.db
+      - NOVEL_DATA_DIR=/data/novel          # 故事图谱数据(与 SQLite 同卷持久化)
+      - NOVEL_ACCESS_KEY=${NOVEL_ACCESS_KEY}
+      - NOVEL_LLM_BASE_URL=${NOVEL_LLM_BASE_URL:-}
+      - NOVEL_LLM_API_KEY=${NOVEL_LLM_API_KEY:-}
+      - NOVEL_LLM_MODEL=${NOVEL_LLM_MODEL:-}
+      - NOVEL_LLM_ENDPOINT=${NOVEL_LLM_ENDPOINT:-chat_completions}
+      # 可选:规划(框架)与写作(草稿)分开的模型路由,未设则用上面的基础模型
+      - NOVEL_LLM_PLAN_MODEL=${NOVEL_LLM_PLAN_MODEL:-}
+      - NOVEL_LLM_PLAN_BASE_URL=${NOVEL_LLM_PLAN_BASE_URL:-}
+      - NOVEL_LLM_PLAN_API_KEY=${NOVEL_LLM_PLAN_API_KEY:-}
+      - NOVEL_LLM_PLAN_ENDPOINT=${NOVEL_LLM_PLAN_ENDPOINT:-}
+      - NOVEL_LLM_WRITE_MODEL=${NOVEL_LLM_WRITE_MODEL:-}
+      - NOVEL_LLM_WRITE_BASE_URL=${NOVEL_LLM_WRITE_BASE_URL:-}
+      - NOVEL_LLM_WRITE_API_KEY=${NOVEL_LLM_WRITE_API_KEY:-}
+      - NOVEL_LLM_WRITE_ENDPOINT=${NOVEL_LLM_WRITE_ENDPOINT:-}
     volumes:
       - support_data:/data   # SQLite 数据库持久化
 
