@@ -14,8 +14,9 @@ if [[ ! -f "$TOKEN_FILE" ]]; then
 fi
 TOKEN="$(tr -d '[:space:]' < "$TOKEN_FILE")"
 
-# 只提交速报文章(pathspec 提交,不影响其他已暂存/未提交的改动)
+# 只提交速报文章(先 add 再 pathspec 提交,不影响其他已暂存/未提交的改动)
 if git status --porcelain -- content/posts/ | grep -q .; then
+  git add content/posts/
   git -c user.name="YYDeng" -c user.email="worldwonderfulawhat@gmail.com" \
     commit -m "post: daily github brief $(date +%F)" -- content/posts/
   echo "Committed."
