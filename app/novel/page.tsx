@@ -182,18 +182,22 @@ export default function NovelStudioPage() {
   )
 
   useEffect(() => {
-    const saved = window.localStorage.getItem('novel-access-key')
-    if (!saved) return
-    loadProjects(saved)
-      .then((list) => {
-        setKey(saved)
-        setAuthed(true)
-        if (list.length > 0) {
-          setProjectId(list[0].project_id)
-          return loadGraph(saved, list[0].project_id)
-        }
-      })
-      .catch(() => window.localStorage.removeItem('novel-access-key'))
+    // 恢复已保存的口令并自动登录;放入宏任务回调,避免在 effect 体内(同步路径)触发 setState
+    const timer = window.setTimeout(() => {
+      const saved = window.localStorage.getItem('novel-access-key')
+      if (!saved) return
+      loadProjects(saved)
+        .then((list) => {
+          setKey(saved)
+          setAuthed(true)
+          if (list.length > 0) {
+            setProjectId(list[0].project_id)
+            return loadGraph(saved, list[0].project_id)
+          }
+        })
+        .catch(() => window.localStorage.removeItem('novel-access-key'))
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [loadProjects, loadGraph])
 
   const unlock = async () => {
