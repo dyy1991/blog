@@ -171,7 +171,9 @@ export class ModelPlannerAdapter implements PlannerAdapter {
       operation: 'write',
       system: this.systemPrompt,
       user: [
-        `Write a ${request.kind} draft grounded in the active branch.`,
+        request.focusNode
+          ? `为节点「${request.focusNode.label}」(${request.focusNode.type})撰写${request.kind === 'dialogue' ? '对白' : '场景'}正文。该节点的大纲:${request.focusNode.content || '(暂无)'}`
+          : `Write a ${request.kind} draft grounded in the active branch.`,
         request.prompt ? `Prompt: ${request.prompt}` : undefined,
         `Project context: ${projectContext(request.project, request.branchId)}`
       ]

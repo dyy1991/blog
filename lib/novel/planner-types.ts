@@ -12,6 +12,8 @@ export interface PlannerDraftRequest {
   branchId: string;
   kind: Draft['kind'];
   prompt?: string;
+  /** 聚焦节点:写这个节点的正文,project.nodes 已裁剪为相关上下文 */
+  focusNode?: { node_id: string; label: string; content: string; type: string };
 }
 
 export interface ModelJsonRequest {

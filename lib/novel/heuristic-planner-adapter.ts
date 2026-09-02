@@ -64,6 +64,9 @@ function draftContent(project: ProjectState, request: PlannerDraftRequest): stri
 
   return [
     project.premise ? `Premise: ${project.premise}` : `Project: ${project.title}`,
+    request.focusNode
+      ? `Focus: ${request.focusNode.label} (${request.focusNode.type})${request.focusNode.content ? `\n${request.focusNode.content}` : ''}`
+      : undefined,
     context ? `Context:\n${context}` : 'Context: no confirmed nodes yet.',
     request.prompt ? `Writing request: ${request.prompt}` : undefined,
     request.kind === 'dialogue'
@@ -107,7 +110,11 @@ export class HeuristicPlannerAdapter implements PlannerAdapter {
       branch_id: request.branchId,
       revision_id: request.project.current_revision_id,
       kind: request.kind,
-      title: request.prompt ? request.prompt.trim().slice(0, 60) : `${request.project.title} ${request.kind}`,
+      title: request.focusNode
+        ? `${request.focusNode.label} · ${request.kind === 'dialogue' ? '对白' : '场景'}`
+        : request.prompt
+          ? request.prompt.trim().slice(0, 60)
+          : `${request.project.title} ${request.kind}`,
       content: draftContent(request.project, request),
       status: 'draft',
       created_at: timestamp,

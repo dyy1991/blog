@@ -626,11 +626,16 @@ export default function NovelStudioPage() {
       setPlanResult(result)
     })
 
-  const writeDraft = (kind: 'scene' | 'dialogue') =>
+  const writeDraft = (kind: 'scene' | 'dialogue', focusNodeId?: string) =>
     run(async () => {
       const result = await api<ToolResultT>(key, `projects/${encodeURIComponent(projectId)}/drafts`, {
         method: 'POST',
-        body: JSON.stringify({ branch_id: branchId, kind, prompt: draftPrompt || undefined })
+        body: JSON.stringify({
+          branch_id: branchId,
+          kind,
+          prompt: draftPrompt || undefined,
+          focus_node_id: focusNodeId
+        })
       })
       setDraftResult(result.draft)
       await loadDrafts(key, projectId, branchId)
@@ -655,11 +660,11 @@ export default function NovelStudioPage() {
       await loadDrafts(key, projectId, branchId)
     })
 
-  const exportAs = (format: string) =>
+  const exportAs = (format: string, extra = '') =>
     run(async () => {
       const data = await api<{ content: string }>(
         key,
-        `projects/${encodeURIComponent(projectId)}/export?format=${format}`
+        `projects/${encodeURIComponent(projectId)}/export?format=${format}&branch_id=${encodeURIComponent(branchId)}${extra}`
       )
       const extension = format === 'json' ? 'json' : format === 'opml' ? 'opml' : 'md'
       const blob = new Blob([data.content], { type: 'text/plain;charset=utf-8' })
@@ -729,6 +734,37 @@ export default function NovelStudioPage() {
       const next = new Set(collapsed)
       next.delete(parentNodeId)
       persistCollapsed(next)
+      await loadGraph(key, projectId, branchId)
+    })
+
+  const classifyNodes = () =>
+    run(async () => {
+      const data = await api<{
+        source: 'model' | 'heuristic'
+        suggestions: Array<{ node_id: string; label: string; current_type: string; suggested_type: string }>
+      }>(key, `projects/${encodeURIComponent(projectId)}/classify?branch_id=${encodeURIComponent(branchId)}`)
+
+      if (data.suggestions.length === 0) {
+        setMessage(`分类完成:没有需要调整的节点(依据:${data.source === 'model' ? '模型' : '本地规则'})`)
+        return
+      }
+      const preview = data.suggestions
+        .slice(0, 20)
+        .map((item) => `· ${item.label}:${typeMeta(item.current_type).name} → ${typeMeta(item.suggested_type).name}`)
+        .join('\n')
+      const more = data.suggestions.length > 20 ? `\n…另有 ${data.suggestions.length - 20} 项` : ''
+      const confirmed = window.confirm(
+        `依据${data.source === 'model' ? '模型' : '本地规则'}的分类建议(${data.suggestions.length} 项):\n\n${preview}${more}\n\n应用这些改动?`
+      )
+      if (!confirmed) return
+
+      await api(key, `projects/${encodeURIComponent(projectId)}/classify`, {
+        method: 'POST',
+        body: JSON.stringify({
+          branch_id: branchId,
+          assignments: data.suggestions.map((item) => ({ node_id: item.node_id, type: item.suggested_type }))
+        })
+      })
       await loadGraph(key, projectId, branchId)
     })
 
@@ -1197,6 +1233,22 @@ export default function NovelStudioPage() {
                 className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-100"
               >
                 全部折叠
+              </button>
+              <button
+                onClick={classifyNodes}
+                disabled={busy}
+                title="让模型重新判定节点类型,预览后再决定是否应用"
+                className="rounded-md border border-violet-300 bg-white px-2 py-1 text-xs text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+              >
+                智能分类
+              </button>
+              <button
+                onClick={() => exportAs('manuscript')}
+                disabled={busy}
+                title="按章节顺序拼接成稿:已采纳草稿优先,无正文时用节点大纲"
+                className="rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+              >
+                导出成稿
               </button>
               {(['markdown', 'mermaid', 'opml', 'json'] as const).map((format) => (
                 <button
@@ -1888,6 +1940,27 @@ export default function NovelStudioPage() {
                   删除节点
                 </button>
               </div>
+              {/* 针对该节点生成草稿:上下文自动裁剪为它的子树+祖先链+关联节点 */}
+              <div className="mt-2 border-t border-gray-100 pt-2">
+                <p className="text-xs text-gray-400">为此节点写正文(上下文自动聚焦到它所在的章节与关联角色)</p>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  <button
+                    onClick={() => writeDraft('scene', selected.node_id)}
+                    disabled={busy}
+                    className="rounded border border-emerald-300 px-2 py-0.5 text-xs text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                  >
+                    生成场景
+                  </button>
+                  <button
+                    onClick={() => writeDraft('dialogue', selected.node_id)}
+                    disabled={busy}
+                    className="rounded border border-emerald-300 px-2 py-0.5 text-xs text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                  >
+                    生成对白
+                  </button>
+                </div>
+              </div>
+
               {/* 关系管理 */}
               <div className="mt-2 border-t border-gray-100 pt-2">
                 <p className="text-xs text-gray-400">关系(不含层级)</p>

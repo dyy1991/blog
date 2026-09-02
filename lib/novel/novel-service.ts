@@ -12,6 +12,8 @@ import {
 import {
   ProjectRepository,
   branchChain,
+  descendantsOf,
+  parentOf,
   resolveEdgesForBranch,
   resolveNodesForBranch,
   type ProjectSummary,
@@ -27,16 +29,32 @@ import {
   type ProjectState,
   type ToolResult
 } from './story-types';
+import { exportManuscript } from './manuscript';
 import { HeuristicPlannerAdapter } from './heuristic-planner-adapter';
-import type { PlannerAdapter } from './planner-types';
+import type { LanguageModelClient, PlannerAdapter, PlannerDraftRequest } from './planner-types';
 
-export type ExportFormat = 'json' | 'opml' | 'markdown' | 'mermaid';
+export type ExportFormat = 'json' | 'opml' | 'markdown' | 'mermaid' | 'manuscript';
 export type ImportFormat = 'json' | 'opml' | 'markdown';
 
 export interface NovelServiceOptions {
   repository: ProjectRepository;
   planner?: PlannerAdapter;
+  /** 可选:用于批量分类的模型客户端(未提供时分类回退到本地规则) */
+  classifier?: LanguageModelClient;
 }
+
+/** 分类可选类型词表,与前端 TYPE_META 对应(不含已弃用的 relationship) */
+export const NODE_TYPE_VOCAB: Array<{ type: string; name: string }> = [
+  { type: 'worldbuilding', name: '世界观设定' },
+  { type: 'character', name: '角色' },
+  { type: 'faction', name: '势力或组织' },
+  { type: 'plot', name: '主线剧情' },
+  { type: 'chapter', name: '章节' },
+  { type: 'scene', name: '场景' },
+  { type: 'branch_note', name: '分支设定' },
+  { type: 'outline', name: '大纲' },
+  { type: 'intake', name: '未分类素材' }
+];
 
 export interface CreateProjectRequest {
   project_id: string;
@@ -81,6 +99,8 @@ export interface WriteDraftRequest {
   branch_id?: string;
   kind: Draft['kind'];
   prompt?: string;
+  /** 针对某个节点生成:上下文裁剪为该节点子树 + 祖先链 + 有关系连线的节点 */
+  focus_node_id?: string;
 }
 
 export interface ImportStoryRequest {
@@ -92,6 +112,11 @@ export interface ImportStoryRequest {
 export interface ExportStoryRequest {
   project_id: string;
   format: ExportFormat;
+  /** manuscript 专用:导出哪个分支的成稿 */
+  branch_id?: string;
+  /** manuscript 专用:只输出已采纳草稿 / 大纲与正文都输出 */
+  drafts_only?: boolean;
+  include_both?: boolean;
 }
 
 export interface GraphProjection {
@@ -358,10 +383,12 @@ function projectForBranch(state: ProjectState, branchId: string): ProjectState {
 export class NovelService {
   private readonly repository: ProjectRepository;
   private readonly planner: PlannerAdapter;
+  private readonly classifier?: LanguageModelClient;
 
   constructor(options: NovelServiceOptions) {
     this.repository = options.repository;
     this.planner = options.planner ?? new HeuristicPlannerAdapter();
+    this.classifier = options.classifier;
   }
 
   async createProject(input: CreateProjectRequest): Promise<ToolResult> {
@@ -557,11 +584,47 @@ export class NovelService {
   async writeDraft(input: WriteDraftRequest): Promise<ToolResult> {
     const state = await this.repository.getProject(input.project_id);
     const branchId = input.branch_id ?? state.active_branch_id;
+    let project = projectForBranch(state, branchId);
+    let focusNode: PlannerDraftRequest['focusNode'];
+
+    if (input.focus_node_id) {
+      const focus = project.nodes.find((node) => node.node_id === input.focus_node_id);
+      if (!focus) {
+        throw new Error(`Node not found in branch ${branchId}: ${input.focus_node_id}`);
+      }
+      const edges = resolveEdgesForBranch(state, branchId);
+      const keep = new Set<string>([focus.node_id]);
+      // 子树:展开这个节点下的全部细节
+      for (const id of descendantsOf(edges, focus.node_id)) keep.add(id);
+      // 祖先链:让模型知道它处在哪一卷/哪一章
+      let cursor = parentOf(edges, focus.node_id)?.from_node_id;
+      const guard = new Set<string>();
+      while (cursor && !guard.has(cursor)) {
+        guard.add(cursor);
+        keep.add(cursor);
+        cursor = parentOf(edges, cursor)?.from_node_id;
+      }
+      // 关系相邻节点:出场角色、冲突对象、前后剧情
+      for (const edge of edges) {
+        if (edge.type === 'contains') continue;
+        if (edge.from_node_id === focus.node_id) keep.add(edge.to_node_id);
+        if (edge.to_node_id === focus.node_id) keep.add(edge.from_node_id);
+      }
+      project = { ...project, nodes: project.nodes.filter((node) => keep.has(node.node_id)) };
+      focusNode = {
+        node_id: focus.node_id,
+        label: focus.label,
+        content: focus.content,
+        type: focus.type
+      };
+    }
+
     const result = await this.planner.writeDraft({
-      project: projectForBranch(state, branchId),
+      project,
       branchId,
       kind: input.kind,
-      prompt: input.prompt
+      prompt: input.prompt,
+      focusNode
     });
     // 生成即持久化,避免刷新丢失
     if (result.draft) {
@@ -656,13 +719,28 @@ export class NovelService {
 
   async exportStory(input: ExportStoryRequest): Promise<{ result: ToolResult; format: ExportFormat; content: string }> {
     const state = await this.repository.getProject(input.project_id);
-    const content = input.format === 'json'
-      ? exportCanonicalJson(state)
-      : input.format === 'opml'
-        ? exportOpml(state)
-        : input.format === 'mermaid'
-          ? exportMermaidMindmap(state)
-          : exportMarkdownOutline(state);
+    let content: string;
+    if (input.format === 'manuscript') {
+      // 成稿按分支解析可见节点/边,再拼接正文
+      const branchId = input.branch_id ?? state.active_branch_id;
+      const { nodes } = resolveNodesForBranch(state, branchId);
+      const nodeIds = new Set(nodes.map((node) => node.node_id));
+      const edges = resolveEdgesForBranch(state, branchId).filter(
+        (edge) => nodeIds.has(edge.from_node_id) && nodeIds.has(edge.to_node_id)
+      );
+      content = exportManuscript(state, nodes, edges, {
+        draftsOnly: input.drafts_only,
+        includeBoth: input.include_both
+      });
+    } else if (input.format === 'json') {
+      content = exportCanonicalJson(state);
+    } else if (input.format === 'opml') {
+      content = exportOpml(state);
+    } else if (input.format === 'mermaid') {
+      content = exportMermaidMindmap(state);
+    } else {
+      content = exportMarkdownOutline(state);
+    }
     return {
       result: toolResult({
         projectId: state.project_id,
@@ -773,6 +851,98 @@ export class NovelService {
       revisionId: saved.revision.revision_id,
       summary: saved.revision.summary,
       graphDelta: saved.revision.delta
+    });
+  }
+
+  /**
+   * 模型辅助分类:让模型重新判定节点类型,返回建议(不写入)。
+   * 未配置模型时回退到本地规则,同样只返回建议。
+   */
+  async suggestNodeTypes(
+    projectId: string,
+    branchId?: string
+  ): Promise<{
+    project_id: string;
+    branch_id: string;
+    source: 'model' | 'heuristic';
+    suggestions: Array<{ node_id: string; label: string; current_type: string; suggested_type: string }>;
+  }> {
+    const state = await this.repository.getProject(projectId);
+    const targetBranch = branchId ?? state.active_branch_id;
+    const { nodes } = resolveNodesForBranch(state, targetBranch);
+
+    let suggested = new Map<string, string>();
+    let source: 'model' | 'heuristic' = 'heuristic';
+
+    const client = this.classifier;
+    if (client && nodes.length > 0) {
+      try {
+        const payload = nodes.map((node) => ({
+          node_id: node.node_id,
+          label: node.label,
+          excerpt: node.content.slice(0, 300)
+        }));
+        const output = await client.completeJson({
+          operation: 'plan',
+          system:
+            '你是小说设定的分类助手。只返回 JSON,不要解释。' +
+            `可选类型:${NODE_TYPE_VOCAB.map((item) => `${item.type}(${item.name})`).join('、')}。`,
+          user:
+            '为下列节点各判定一个最贴切的类型。依据名称与摘录判断,拿不准时选 intake。\n' +
+            JSON.stringify(payload),
+          response_shape: '{"assignments":[{"node_id":"...","type":"..."}]}'
+        });
+        const record = output && typeof output === 'object' ? (output as Record<string, unknown>) : {};
+        const assignments = Array.isArray(record.assignments) ? record.assignments : [];
+        const allowed = new Set(NODE_TYPE_VOCAB.map((item) => item.type));
+        for (const item of assignments) {
+          if (!item || typeof item !== 'object') continue;
+          const entry = item as Record<string, unknown>;
+          if (typeof entry.node_id === 'string' && typeof entry.type === 'string' && allowed.has(entry.type)) {
+            suggested.set(entry.node_id, entry.type);
+          }
+        }
+        if (suggested.size > 0) {
+          source = 'model';
+        }
+      } catch {
+        // 模型不可用时静默回退到规则分类
+        suggested = new Map();
+      }
+    }
+
+    const suggestions = nodes
+      .map((node) => ({
+        node_id: node.node_id,
+        label: node.label,
+        current_type: node.type,
+        suggested_type: suggested.get(node.node_id) ?? inferNodeType(`${node.label}\n${node.content}`)
+      }))
+      .filter((item) => item.suggested_type !== item.current_type);
+
+    return { project_id: projectId, branch_id: targetBranch, source, suggestions };
+  }
+
+  /** 批量写入分类结果(经用户确认) */
+  async applyNodeTypes(
+    projectId: string,
+    assignments: Array<{ node_id: string; type: string }>,
+    branchId?: string
+  ): Promise<ToolResult> {
+    const state = await this.repository.getProject(projectId);
+    const targetBranch = branchId ?? state.active_branch_id;
+    let applied = 0;
+    let lastRevision = state.current_revision_id;
+    for (const item of assignments) {
+      const saved = await this.repository.updateNode(projectId, targetBranch, item.node_id, { type: item.type });
+      lastRevision = saved.revision.revision_id;
+      applied += 1;
+    }
+    return toolResult({
+      projectId,
+      branchId: targetBranch,
+      revisionId: lastRevision,
+      summary: `已更新 ${applied} 个节点的类型。`
     });
   }
 

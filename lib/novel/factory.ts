@@ -58,6 +58,13 @@ function buildClient(config: ClientEnvConfig, base: ClientEnvConfig): LanguageMo
   });
 }
 
+/** 分类用的模型客户端:优先用 plan 侧配置,其次基础配置 */
+function buildClassifier(): LanguageModelClient | undefined {
+  const base = readClientEnv('');
+  const planOverride = readClientEnv('PLAN');
+  return buildClient(planOverride, base) ?? undefined;
+}
+
 function buildPlanner(): PlannerAdapter {
   const base = readClientEnv('');
   const planOverride = readClientEnv('PLAN');
@@ -154,7 +161,11 @@ export function getNovelService(): NovelService {
     const repository = new ProjectRepository({ dataDir });
     globalThis.__novelRuntime = {
       repository,
-      service: new NovelService({ repository, planner: buildPlanner() })
+      service: new NovelService({
+        repository,
+        planner: buildPlanner(),
+        classifier: buildClassifier()
+      })
     };
   }
   return globalThis.__novelRuntime.service;

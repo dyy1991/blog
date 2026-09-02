@@ -32,7 +32,15 @@ function asOptionalString(value: unknown): string | undefined {
 }
 
 function asExportFormat(value: unknown): ExportFormat {
-  if (value === 'json' || value === 'opml' || value === 'markdown' || value === 'mermaid') return value
+  if (
+    value === 'json' ||
+    value === 'opml' ||
+    value === 'markdown' ||
+    value === 'mermaid' ||
+    value === 'manuscript'
+  ) {
+    return value
+  }
   return 'json'
 }
 
@@ -91,6 +99,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     if (path.length === 3 && path[0] === 'projects' && path[2] === 'graph') {
       return NextResponse.json(await service.getGraph(path[1], url.searchParams.get('branch_id') ?? undefined))
     }
+    // GET /api/novel/projects/:id/classify?branch_id= —— 返回分类建议(不写入)
+    if (path.length === 3 && path[0] === 'projects' && path[2] === 'classify') {
+      return NextResponse.json(
+        await service.suggestNodeTypes(path[1], url.searchParams.get('branch_id') ?? undefined)
+      )
+    }
     // GET /api/novel/projects/:id/drafts?branch_id=
     if (path.length === 3 && path[0] === 'projects' && path[2] === 'drafts') {
       return NextResponse.json(
@@ -101,7 +115,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     if (path.length === 3 && path[0] === 'projects' && path[2] === 'export') {
       const exported = await service.exportStory({
         project_id: path[1],
-        format: asExportFormat(url.searchParams.get('format'))
+        format: asExportFormat(url.searchParams.get('format')),
+        branch_id: url.searchParams.get('branch_id') ?? undefined,
+        drafts_only: url.searchParams.get('drafts_only') === 'true',
+        include_both: url.searchParams.get('include_both') === 'true'
       })
       return NextResponse.json({ ...exported.result, format: exported.format, content: exported.content })
     }
@@ -180,7 +197,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
             project_id: projectId,
             branch_id: asOptionalString(body.branch_id),
             kind: body.kind === 'dialogue' ? 'dialogue' : 'scene',
-            prompt: asOptionalString(body.prompt)
+            prompt: asOptionalString(body.prompt),
+            focus_node_id: asOptionalString(body.focus_node_id)
           })
         )
       }
@@ -202,6 +220,20 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
             asOptionalString(body.branch_id)
           ),
           { status: 201 }
+        )
+      }
+      // POST /api/novel/projects/:id/classify  { assignments: [{node_id, type}], branch_id? }
+      if (path[2] === 'classify') {
+        const raw = Array.isArray(body.assignments) ? body.assignments : []
+        const assignments = raw
+          .map((item) => (item && typeof item === 'object' ? (item as Record<string, unknown>) : {}))
+          .filter((item) => typeof item.node_id === 'string' && typeof item.type === 'string')
+          .map((item) => ({ node_id: item.node_id as string, type: item.type as string }))
+        if (assignments.length === 0) {
+          return NextResponse.json({ error: { message: 'assignments 不能为空' } }, { status: 400 })
+        }
+        return NextResponse.json(
+          await service.applyNodeTypes(projectId, assignments, asOptionalString(body.branch_id))
         )
       }
       // POST /api/novel/projects/:id/edges  { from_node_id, to_node_id, type, label?, branch_id? }
