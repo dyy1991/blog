@@ -174,6 +174,26 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
           })
         )
       }
+      // POST /api/novel/projects/:id/nodes  { label, content?, type?, parent_node_id?, branch_id? }
+      if (path[2] === 'nodes') {
+        const label = asString(body.label).trim()
+        if (!label) {
+          return NextResponse.json({ error: { message: '节点名称不能为空' } }, { status: 400 })
+        }
+        return NextResponse.json(
+          await service.createNode(
+            projectId,
+            {
+              label,
+              content: asOptionalString(body.content),
+              type: asOptionalString(body.type),
+              parent_node_id: body.parent_node_id === null ? null : asOptionalString(body.parent_node_id)
+            },
+            asOptionalString(body.branch_id)
+          ),
+          { status: 201 }
+        )
+      }
       // POST /api/novel/projects/:id/import
       if (path[2] === 'import') {
         return NextResponse.json(
@@ -205,6 +225,17 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ path: str
     if (path.length === 4 && path[0] === 'projects' && path[2] === 'nodes') {
       const body = await readBody(req)
       const status = body.status
+      // 只改父级(拖拽重挂)
+      if ('parent_node_id' in body) {
+        return NextResponse.json(
+          await service.reparentNode(
+            path[1],
+            path[3],
+            body.parent_node_id === null ? null : asString(body.parent_node_id),
+            asOptionalString(body.branch_id)
+          )
+        )
+      }
       return NextResponse.json(
         await service.updateNode(
           path[1],
@@ -243,12 +274,15 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ path: st
   if (!checkKey(req)) return unauthorized()
   const { path } = await ctx.params
   const service = getNovelService()
-  const branchParam = new URL(req.url).searchParams.get('branch_id') ?? undefined
+  const params = new URL(req.url).searchParams
+  const branchParam = params.get('branch_id') ?? undefined
 
   try {
-    // DELETE /api/novel/projects/:id/nodes/:nodeId?branch_id=
+    // DELETE /api/novel/projects/:id/nodes/:nodeId?branch_id=&cascade=true
     if (path.length === 4 && path[0] === 'projects' && path[2] === 'nodes') {
-      return NextResponse.json(await service.deleteNode(path[1], path[3], branchParam))
+      return NextResponse.json(
+        await service.deleteNode(path[1], path[3], branchParam, params.get('cascade') === 'true')
+      )
     }
     // DELETE /api/novel/projects/:id/drafts/:draftId
     if (path.length === 4 && path[0] === 'projects' && path[2] === 'drafts') {

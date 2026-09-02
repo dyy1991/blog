@@ -101,6 +101,43 @@ function ExpandButton({ onClick, label = '放大查看' }: { onClick: () => void
 
 type ModalKind = 'intake' | 'node' | 'readonly'
 
+/** 按父节点类型提供的快捷子节点模板 */
+const TEMPLATES: Record<string, Array<{ label: string; type: string }>> = {
+  character: [
+    { label: '背景故事', type: 'worldbuilding' },
+    { label: '性格', type: 'character' },
+    { label: '动机', type: 'plot' },
+    { label: '人物关系', type: 'relationship' }
+  ],
+  chapter: [
+    { label: '场景', type: 'scene' },
+    { label: '冲突', type: 'plot' },
+    { label: '转折', type: 'plot' }
+  ],
+  plot: [
+    { label: '起因', type: 'plot' },
+    { label: '发展', type: 'plot' },
+    { label: '高潮', type: 'plot' },
+    { label: '结局', type: 'plot' }
+  ],
+  worldbuilding: [
+    { label: '地理', type: 'worldbuilding' },
+    { label: '历史', type: 'worldbuilding' },
+    { label: '规则体系', type: 'worldbuilding' },
+    { label: '势力', type: 'relationship' }
+  ],
+  scene: [
+    { label: '出场人物', type: 'character' },
+    { label: '冲突', type: 'plot' },
+    { label: '结果', type: 'plot' }
+  ]
+}
+
+/** 新建子节点时的默认类型:沿用父节点类型,让手动搭建的结构保持连贯 */
+function childTypeFor(parentType: string): string {
+  return parentType || 'intake'
+}
+
 interface PlannerInfoT {
   mode: 'model' | 'heuristic'
   plan_model: string | null
@@ -112,52 +149,107 @@ interface LaidNode {
   node: NodeT
   x: number
   y: number
+  depth: number
+  childCount: number
+  collapsed: boolean
+  parentId: string | null
 }
 
-interface LaidGroup {
-  type: string
-  x: number
-  y: number
-  nodes: LaidNode[]
-}
-
-const NODE_W = 168
+const NODE_W = 176
 const NODE_H = 40
-const GROUP_W = 120
-const V_GAP = 12
-const ROOT_W = 150
+const V_GAP = 14
+const H_GAP = 96
+const ROOT_W = 160
+const ROOT_X = 12
 
-function layoutMindmap(title: string, nodes: NodeT[]) {
-  const byType = new Map<string, NodeT[]>()
-  for (const node of nodes) {
-    const list = byType.get(node.type) ?? []
-    list.push(node)
-    byType.set(node.type, list)
-  }
-  const order = [...byType.keys()].sort(
-    (a, b) => (byType.get(b)?.length ?? 0) - (byType.get(a)?.length ?? 0)
-  )
+interface TreeNode {
+  node: NodeT
+  children: TreeNode[]
+}
 
-  const groups: LaidGroup[] = []
-  let cursorY = 40
-  const groupX = ROOT_W + 100
-  const nodeX = groupX + GROUP_W + 90
-  for (const type of order) {
-    const members = byType.get(type) ?? []
-    const blockH = Math.max(members.length * (NODE_H + V_GAP), NODE_H + V_GAP)
-    const laid: LaidNode[] = members.map((node, index) => ({
-      node,
-      x: nodeX,
-      y: cursorY + index * (NODE_H + V_GAP)
-    }))
-    groups.push({ type, x: groupX, y: cursorY + blockH / 2 - NODE_H / 2, nodes: laid })
-    cursorY += blockH + 28
+/** 按 contains 边构建森林;每个节点只认第一条父边,其余关系另行绘制 */
+function buildForest(nodes: NodeT[], edges: EdgeT[]): { roots: TreeNode[]; parentOf: Map<string, string> } {
+  const byId = new Map(nodes.map((node) => [node.node_id, node]))
+  const parentOf = new Map<string, string>()
+  const childrenOf = new Map<string, string[]>()
+
+  for (const edge of edges) {
+    if (edge.type !== 'contains') continue
+    if (!byId.has(edge.from_node_id) || !byId.has(edge.to_node_id)) continue
+    if (parentOf.has(edge.to_node_id)) continue
+    parentOf.set(edge.to_node_id, edge.from_node_id)
+    const list = childrenOf.get(edge.from_node_id) ?? []
+    list.push(edge.to_node_id)
+    childrenOf.set(edge.from_node_id, list)
   }
 
-  const height = Math.max(cursorY + 20, 360)
-  const rootY = height / 2 - NODE_H / 2
-  const width = nodeX + NODE_W + 60
-  return { groups, rootY, width, height, title }
+  const build = (id: string, seen: Set<string>): TreeNode => {
+    seen.add(id)
+    const children = (childrenOf.get(id) ?? [])
+      .filter((childId) => !seen.has(childId))
+      .map((childId) => build(childId, seen))
+    return { node: byId.get(id)!, children }
+  }
+
+  const seen = new Set<string>()
+  const roots = nodes
+    .filter((node) => !parentOf.has(node.node_id))
+    .map((node) => build(node.node_id, seen))
+
+  return { roots, parentOf }
+}
+
+/** 经典 tidy tree:先按子树高度分配纵向空间,再把父节点对齐到子树中心 */
+function layoutTree(title: string, roots: TreeNode[], collapsed: Set<string>, parentOf: Map<string, string>) {
+  const laid: LaidNode[] = []
+  let cursorY = 24
+  let maxX = ROOT_X + ROOT_W
+
+  const place = (item: TreeNode, depth: number): { top: number; bottom: number; center: number } => {
+    const x = ROOT_X + ROOT_W + H_GAP + depth * (NODE_W + H_GAP)
+    const isCollapsed = collapsed.has(item.node.node_id)
+    const hasChildren = item.children.length > 0
+
+    if (!hasChildren || isCollapsed) {
+      const y = cursorY
+      cursorY += NODE_H + V_GAP
+      laid.push({
+        node: item.node,
+        x,
+        y,
+        depth,
+        childCount: item.children.length,
+        collapsed: isCollapsed,
+        parentId: parentOf.get(item.node.node_id) ?? null
+      })
+      maxX = Math.max(maxX, x + NODE_W)
+      return { top: y, bottom: y + NODE_H, center: y + NODE_H / 2 }
+    }
+
+    const spans = item.children.map((child) => place(child, depth + 1))
+    const center = (spans[0].center + spans[spans.length - 1].center) / 2
+    const y = center - NODE_H / 2
+    laid.push({
+      node: item.node,
+      x,
+      y,
+      depth,
+      childCount: item.children.length,
+      collapsed: false,
+      parentId: parentOf.get(item.node.node_id) ?? null
+    })
+    maxX = Math.max(maxX, x + NODE_W)
+    return { top: Math.min(y, spans[0].top), bottom: Math.max(y + NODE_H, spans[spans.length - 1].bottom), center }
+  }
+
+  const rootSpans = roots.map((root) => place(root, 0))
+  const height = Math.max(cursorY + 24, 420)
+  const rootY =
+    rootSpans.length > 0
+      ? (rootSpans[0].center + rootSpans[rootSpans.length - 1].center) / 2 - NODE_H / 2
+      : height / 2 - NODE_H / 2
+
+  return { laid, rootY, width: maxX + 60, height, title, topLevelIds: roots.map((root) => root.node.node_id) }
 }
 
 async function api<T>(key: string, path: string, init?: RequestInit): Promise<T> {
@@ -201,6 +293,11 @@ export default function NovelStudioPage() {
   const [draftResult, setDraftResult] = useState<DraftT | null>(null)
   const [drafts, setDrafts] = useState<DraftT[]>([])
   const [openDraftId, setOpenDraftId] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [hoverNodeId, setHoverNodeId] = useState<string | null>(null)
+  const [dragState, setDragState] = useState<
+    { nodeId: string; x: number; y: number; startX: number; startY: number; moved: boolean; overId: string | null } | null
+  >(null)
   const [planner, setPlanner] = useState<PlannerInfoT | null>(null)
   const [modal, setModal] = useState<{ kind: ModalKind; title: string } | null>(null)
   const [readonlyText, setReadonlyText] = useState('')
@@ -214,6 +311,7 @@ export default function NovelStudioPage() {
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
+  const svgRef = useRef<SVGSVGElement | null>(null)
 
   const loadProjects = useCallback(async (k: string) => {
     const data = await api<{ projects: ProjectSummaryT[] }>(k, 'projects')
@@ -261,6 +359,47 @@ export default function NovelStudioPage() {
     }, 0)
     return () => window.clearTimeout(timer)
   }, [loadProjects, loadGraph])
+
+  // 折叠状态按 项目+分支 存 localStorage
+  const collapseKey = projectId && branchId ? `novel-collapsed-${projectId}-${branchId}` : ''
+  useEffect(() => {
+    if (!collapseKey) return
+    try {
+      const saved = window.localStorage.getItem(collapseKey)
+      setCollapsed(new Set<string>(saved ? (JSON.parse(saved) as string[]) : []))
+    } catch {
+      setCollapsed(new Set())
+    }
+  }, [collapseKey])
+
+  const persistCollapsed = (next: Set<string>) => {
+    setCollapsed(next)
+    if (!collapseKey) return
+    try {
+      window.localStorage.setItem(collapseKey, JSON.stringify([...next]))
+    } catch {
+      /* 存储不可用时仅保持内存状态 */
+    }
+  }
+
+  const toggleCollapse = (nodeId: string) => {
+    const next = new Set(collapsed)
+    if (next.has(nodeId)) next.delete(nodeId)
+    else next.add(nodeId)
+    persistCollapsed(next)
+  }
+
+  const collapseAll = () => {
+    const withChildren = new Set<string>()
+    for (const laid of layout?.laid ?? []) {
+      if (laid.childCount > 0) withChildren.add(laid.node.node_id)
+    }
+    // 折叠后子节点不再出现在 laid 中,需从完整边集重算
+    for (const edge of graph?.graph.edges ?? []) {
+      if (edge.type === 'contains') withChildren.add(edge.from_node_id)
+    }
+    persistCollapsed(withChildren)
+  }
 
   useEffect(() => {
     if (!modal) return
@@ -433,17 +572,83 @@ export default function NovelStudioPage() {
       await loadGraph(key, projectId, branchId)
     })
 
+  const addChildNode = (parentNodeId: string | null, label: string, type?: string) =>
+    run(async () => {
+      if (!label.trim()) return
+      await api(key, `projects/${encodeURIComponent(projectId)}/nodes`, {
+        method: 'POST',
+        body: JSON.stringify({ label: label.trim(), type, parent_node_id: parentNodeId, branch_id: branchId })
+      })
+      if (parentNodeId && collapsed.has(parentNodeId)) {
+        const next = new Set(collapsed)
+        next.delete(parentNodeId)
+        persistCollapsed(next)
+      }
+      await loadGraph(key, projectId, branchId)
+    })
+
+  const promptAddChild = (parentNodeId: string | null, parentType?: string) => {
+    const label = window.prompt(parentNodeId ? '子节点名称:' : '顶层节点名称:')
+    if (!label) return
+    addChildNode(parentNodeId, label, parentType ? childTypeFor(parentType) : undefined)
+  }
+
+  const addTemplateChildren = (parentNodeId: string, parentType: string) =>
+    run(async () => {
+      const preset = TEMPLATES[parentType]
+      if (!preset) return
+      for (const item of preset) {
+        await api(key, `projects/${encodeURIComponent(projectId)}/nodes`, {
+          method: 'POST',
+          body: JSON.stringify({
+            label: item.label,
+            type: item.type,
+            parent_node_id: parentNodeId,
+            branch_id: branchId
+          })
+        })
+      }
+      const next = new Set(collapsed)
+      next.delete(parentNodeId)
+      persistCollapsed(next)
+      await loadGraph(key, projectId, branchId)
+    })
+
+  const reparentNode = (nodeId: string, parentNodeId: string | null) =>
+    run(async () => {
+      await api(key, `projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(nodeId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ parent_node_id: parentNodeId, branch_id: branchId })
+      })
+      await loadGraph(key, projectId, branchId)
+    })
+
   const deleteNode = () =>
     run(async () => {
       if (!selected) return
+      const childCount = nodePositions.get(selected.node_id)?.childCount ?? 0
       const inherited = selected.branch_scope !== branchId
-      const confirmText = inherited
-        ? `「${selected.label}」继承自分支 ${selected.branch_scope}。将只在当前分支 ${branchId} 隐藏它,父分支保持不变。继续?`
-        : `删除节点「${selected.label}」?关联的连线也会一并移除。`
-      if (!window.confirm(confirmText)) return
+      const inheritedNote = inherited
+        ? `\n\n注意:该节点继承自分支 ${selected.branch_scope},只会在当前分支 ${branchId} 隐藏,父分支保持不变。`
+        : ''
+
+      let cascade = false
+      if (childCount > 0) {
+        // 「确定」= 连子节点一起删,「取消」后再问是否只删自己
+        cascade = window.confirm(
+          `「${selected.label}」有 ${childCount} 个直接子节点。\n\n` +
+            `点「确定」= 连同整棵子树一起删除\n点「取消」= 只删这一个,子节点上提到它的父级${inheritedNote}`
+        )
+        if (!cascade && !window.confirm(`只删除「${selected.label}」,把子节点上提到上一级?`)) {
+          return
+        }
+      } else if (!window.confirm(`删除节点「${selected.label}」?关联的连线也会一并移除。${inheritedNote}`)) {
+        return
+      }
+
       await api(
         key,
-        `projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(selected.node_id)}?branch_id=${encodeURIComponent(branchId)}`,
+        `projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(selected.node_id)}?branch_id=${encodeURIComponent(branchId)}&cascade=${cascade}`,
         { method: 'DELETE' }
       )
       setSelected(null)
@@ -471,11 +676,16 @@ export default function NovelStudioPage() {
       await loadGraph(key, pid)
     })
 
-  const layout = useMemo(() => {
+  const forest = useMemo(() => {
     if (!graph) return null
+    return buildForest(graph.graph.nodes, graph.graph.edges)
+  }, [graph])
+
+  const layout = useMemo(() => {
+    if (!graph || !forest) return null
     const project = projects.find((item) => item.project_id === projectId)
-    return layoutMindmap(project?.title ?? projectId, graph.graph.nodes)
-  }, [graph, projects, projectId])
+    return layoutTree(project?.title ?? projectId, forest.roots, collapsed, forest.parentOf)
+  }, [graph, forest, projects, projectId, collapsed])
 
   const overriddenIds = useMemo(
     () => new Set(graph?.graph.overridden_node_ids ?? []),
@@ -484,25 +694,92 @@ export default function NovelStudioPage() {
 
   const nodePositions = useMemo(() => {
     const map = new Map<string, LaidNode>()
-    if (layout) {
-      for (const group of layout.groups) {
-        for (const laid of group.nodes) {
-          map.set(laid.node.node_id, laid)
-        }
-      }
+    for (const laid of layout?.laid ?? []) {
+      map.set(laid.node.node_id, laid)
     }
     return map
   }, [layout])
 
+  /** 图例仍按类型统计,数据源改为可见节点 */
+  const typeCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const node of graph?.graph.nodes ?? []) {
+      counts.set(node.type, (counts.get(node.type) ?? 0) + 1)
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])
+  }, [graph])
+
+  /** 屏幕坐标 → 图坐标 */
+  const toGraphPoint = (clientX: number, clientY: number) => {
+    const rect = svgRef.current?.getBoundingClientRect()
+    if (!rect) return { x: 0, y: 0 }
+    return { x: (clientX - rect.left - pan.x) / zoom, y: (clientY - rect.top - pan.y) / zoom }
+  }
+
+  /** 命中测试:落点位于哪个节点矩形内 */
+  const nodeAt = (x: number, y: number, excludeId?: string) => {
+    for (const laid of layout?.laid ?? []) {
+      if (laid.node.node_id === excludeId) continue
+      if (x >= laid.x && x <= laid.x + NODE_W && y >= laid.y && y <= laid.y + NODE_H) {
+        return laid.node.node_id
+      }
+    }
+    return null
+  }
+
+  const onNodePointerDown = (event: React.PointerEvent<SVGRectElement>, nodeId: string) => {
+    // 阻止冒泡,避免触发画布平移
+    event.stopPropagation()
+    const point = toGraphPoint(event.clientX, event.clientY)
+    setDragState({
+      nodeId,
+      x: point.x,
+      y: point.y,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+      overId: null
+    })
+    ;(event.target as Element).releasePointerCapture?.(event.pointerId)
+  }
+
   const onPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (dragState) return
     dragRef.current = { startX: event.clientX, startY: event.clientY, baseX: pan.x, baseY: pan.y }
   }
+
   const onPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (dragState) {
+      const point = toGraphPoint(event.clientX, event.clientY)
+      // 位移超过 5px 才算拖拽,避免单击被误判成「拖到空白 → 提升为顶层」
+      const moved =
+        dragState.moved ||
+        Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY) > 5
+      setDragState({
+        ...dragState,
+        x: point.x,
+        y: point.y,
+        moved,
+        overId: moved ? nodeAt(point.x, point.y, dragState.nodeId) : null
+      })
+      return
+    }
     const drag = dragRef.current
     if (!drag) return
     setPan({ x: drag.baseX + (event.clientX - drag.startX), y: drag.baseY + (event.clientY - drag.startY) })
   }
+
   const onPointerUp = () => {
+    if (dragState) {
+      const { nodeId, overId, moved } = dragState
+      const currentParent = nodePositions.get(nodeId)?.parentId ?? null
+      setDragState(null)
+      // 拖到别的节点 => 挂到它下面;拖到空白 => 提升为顶层;未真正拖动则视为单击
+      if (moved && overId !== currentParent) {
+        reparentNode(nodeId, overId)
+      }
+      return
+    }
     dragRef.current = null
   }
 
@@ -604,6 +881,12 @@ export default function NovelStudioPage() {
             <button onClick={createBranch} className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-slate-800 hover:bg-gray-100">
               + 分支
             </button>
+            <button
+              onClick={() => promptAddChild(null)}
+              className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-slate-800 hover:bg-gray-100"
+            >
+              + 顶层节点
+            </button>
             {(graph.graph.branch_chain?.length ?? 0) > 1 && (
               <span className="text-xs text-gray-400">
                 分叉自 {graph.graph.branch_chain!.slice(1).join(' → ')}
@@ -624,6 +907,18 @@ export default function NovelStudioPage() {
                 className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-slate-800"
               >
                 复位
+              </button>
+              <button
+                onClick={() => persistCollapsed(new Set())}
+                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-100"
+              >
+                全部展开
+              </button>
+              <button
+                onClick={collapseAll}
+                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-100"
+              >
+                全部折叠
               </button>
               {(['markdown', 'mermaid', 'opml', 'json'] as const).map((format) => (
                 <button
@@ -680,6 +975,7 @@ export default function NovelStudioPage() {
         <div className="h-[calc(100vh-16rem)] min-h-[520px] flex-1 overflow-hidden rounded-xl border border-gray-200 bg-white">
           {layout && graph ? (
             <svg
+              ref={svgRef}
               width="100%"
               height="100%"
               onPointerDown={onPointerDown}
@@ -689,110 +985,186 @@ export default function NovelStudioPage() {
               className="cursor-grab touch-none select-none active:cursor-grabbing"
             >
               <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
-                {/* 根 → 类型组 连线 */}
-                {layout.groups.map((group) => (
-                  <path
-                    key={`root-${group.type}`}
-                    d={`M ${ROOT_W + 20} ${layout.rootY + NODE_H / 2} C ${ROOT_W + 60} ${layout.rootY + NODE_H / 2}, ${group.x - 40} ${group.y + NODE_H / 2}, ${group.x} ${group.y + NODE_H / 2}`}
-                    fill="none"
-                    stroke="#cbd5e1"
-                    strokeWidth={1.5}
-                  />
-                ))}
-                {/* 类型组 → 节点 连线 */}
-                {layout.groups.map((group) =>
-                  group.nodes.map((laid) => (
+                {/* 根 → 顶层节点 连线 */}
+                {layout.laid
+                  .filter((laid) => laid.parentId === null)
+                  .map((laid) => (
                     <path
-                      key={`g-${laid.node.node_id}`}
-                      d={`M ${group.x + GROUP_W} ${group.y + NODE_H / 2} C ${group.x + GROUP_W + 40} ${group.y + NODE_H / 2}, ${laid.x - 40} ${laid.y + NODE_H / 2}, ${laid.x} ${laid.y + NODE_H / 2}`}
+                      key={`root-${laid.node.node_id}`}
+                      d={`M ${ROOT_X + ROOT_W} ${layout.rootY + NODE_H / 2} C ${ROOT_X + ROOT_W + 50} ${layout.rootY + NODE_H / 2}, ${laid.x - 50} ${laid.y + NODE_H / 2}, ${laid.x} ${laid.y + NODE_H / 2}`}
                       fill="none"
-                      stroke={typeMeta(group.type).color}
-                      strokeOpacity={0.35}
+                      stroke="#cbd5e1"
                       strokeWidth={1.5}
                     />
-                  ))
-                )}
-                {/* 关系边(节点间) */}
-                {graph.graph.edges.map((edge) => {
-                  const from = nodePositions.get(edge.from_node_id)
-                  const to = nodePositions.get(edge.to_node_id)
-                  if (!from || !to) return null
-                  const x1 = from.x + NODE_W
-                  const y1 = from.y + NODE_H / 2
-                  const x2 = to.x + NODE_W
-                  const y2 = to.y + NODE_H / 2
-                  const bend = 60 + Math.abs(y2 - y1) / 4
+                  ))}
+                {/* 父 → 子 层级连线 */}
+                {layout.laid.map((laid) => {
+                  if (!laid.parentId) return null
+                  const parent = nodePositions.get(laid.parentId)
+                  if (!parent) return null
+                  const x1 = parent.x + NODE_W
+                  const y1 = parent.y + NODE_H / 2
+                  const x2 = laid.x
+                  const y2 = laid.y + NODE_H / 2
                   return (
-                    <g key={edge.edge_id}>
-                      <path
-                        d={`M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 + bend} ${y2}, ${x2} ${y2}`}
-                        fill="none"
-                        stroke="#f472b6"
-                        strokeDasharray="4 3"
-                        strokeWidth={1.2}
+                    <path
+                      key={`tree-${laid.node.node_id}`}
+                      d={`M ${x1} ${y1} C ${x1 + 48} ${y1}, ${x2 - 48} ${y2}, ${x2} ${y2}`}
+                      fill="none"
+                      stroke={typeMeta(laid.node.type).color}
+                      strokeOpacity={0.45}
+                      strokeWidth={1.5}
+                    />
+                  )
+                })}
+                {/* 非层级关系边(粉色虚线) */}
+                {graph.graph.edges
+                  .filter((edge) => edge.type !== 'contains')
+                  .map((edge) => {
+                    const from = nodePositions.get(edge.from_node_id)
+                    const to = nodePositions.get(edge.to_node_id)
+                    if (!from || !to) return null
+                    const x1 = from.x + NODE_W
+                    const y1 = from.y + NODE_H / 2
+                    const x2 = to.x + NODE_W
+                    const y2 = to.y + NODE_H / 2
+                    const bend = 60 + Math.abs(y2 - y1) / 4
+                    return (
+                      <g key={edge.edge_id}>
+                        <path
+                          d={`M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 + bend} ${y2}, ${x2} ${y2}`}
+                          fill="none"
+                          stroke="#f472b6"
+                          strokeDasharray="4 3"
+                          strokeWidth={1.2}
+                        />
+                        {edge.label && (
+                          <text x={Math.max(x1, x2) + bend - 4} y={(y1 + y2) / 2} fontSize={10} fill="#db2777">
+                            {edge.label}
+                          </text>
+                        )}
+                      </g>
+                    )
+                  })}
+                {/* 拖拽时的指示线 */}
+                {dragState && nodePositions.get(dragState.nodeId) && (
+                  <path
+                    d={`M ${nodePositions.get(dragState.nodeId)!.x + NODE_W / 2} ${nodePositions.get(dragState.nodeId)!.y + NODE_H / 2} L ${dragState.x} ${dragState.y}`}
+                    stroke="#2563eb"
+                    strokeWidth={2}
+                    strokeDasharray="5 4"
+                    fill="none"
+                  />
+                )}
+                {/* 根节点(项目标题) */}
+                <g
+                  onClick={() => promptAddChild(null)}
+                  className="cursor-pointer"
+                  onPointerEnter={() => setHoverNodeId('__root__')}
+                  onPointerLeave={() => setHoverNodeId(null)}
+                >
+                  <rect x={ROOT_X} y={layout.rootY} width={ROOT_W} height={NODE_H} rx={12} fill="#1e293b" />
+                  <text x={ROOT_X + ROOT_W / 2} y={layout.rootY + NODE_H / 2 + 4} textAnchor="middle" fontSize={13} fill="#fff">
+                    {layout.title.length > 10 ? `${layout.title.slice(0, 10)}…` : layout.title}
+                  </text>
+                  {hoverNodeId === '__root__' && (
+                    <>
+                      <circle cx={ROOT_X + ROOT_W + 12} cy={layout.rootY + NODE_H / 2} r={9} fill="#2563eb" />
+                      <text
+                        x={ROOT_X + ROOT_W + 12}
+                        y={layout.rootY + NODE_H / 2 + 4}
+                        textAnchor="middle"
+                        fontSize={13}
+                        fill="#fff"
+                      >
+                        +
+                      </text>
+                    </>
+                  )}
+                </g>
+                {/* 内容节点 */}
+                {layout.laid.map((laid) => {
+                  const meta = typeMeta(laid.node.type)
+                  const nodeId = laid.node.node_id
+                  const isSelected = selected?.node_id === nodeId
+                  const isInherited = laid.node.branch_scope !== branchId
+                  const isOverridden = overriddenIds.has(nodeId)
+                  const isDropTarget = dragState?.overId === nodeId
+                  const isDragging = dragState?.nodeId === nodeId
+                  return (
+                    <g
+                      key={nodeId}
+                      opacity={isDragging ? 0.4 : 1}
+                      onPointerEnter={() => setHoverNodeId(nodeId)}
+                      onPointerLeave={() => setHoverNodeId((current) => (current === nodeId ? null : current))}
+                    >
+                      <rect
+                        x={laid.x}
+                        y={laid.y}
+                        width={NODE_W}
+                        height={NODE_H}
+                        rx={8}
+                        fill={isDropTarget ? '#eff6ff' : isInherited ? '#f8fafc' : '#fff'}
+                        stroke={isDropTarget ? '#2563eb' : isSelected ? '#2563eb' : meta.color}
+                        strokeWidth={isDropTarget ? 3 : isSelected ? 2.5 : 1.2}
+                        strokeDasharray={isInherited ? '4 3' : undefined}
+                        className="cursor-grab"
+                        onPointerDown={(event) => onNodePointerDown(event, nodeId)}
+                        onClick={() => selectNode(laid.node)}
                       />
-                      {edge.label && (
-                        <text x={Math.max(x1, x2) + bend - 4} y={(y1 + y2) / 2} fontSize={10} fill="#db2777" textAnchor="start">
-                          {edge.label}
-                        </text>
+                      {isOverridden && <circle cx={laid.x + NODE_W - 8} cy={laid.y + 8} r={3.5} fill="#2563eb" />}
+                      <circle cx={laid.x + 12} cy={laid.y + NODE_H / 2} r={4} fill={meta.color} pointerEvents="none" />
+                      <text
+                        x={laid.x + 24}
+                        y={laid.y + NODE_H / 2 + 4}
+                        fontSize={12}
+                        fill="#334155"
+                        pointerEvents="none"
+                      >
+                        {laid.node.label.length > 12 ? `${laid.node.label.slice(0, 12)}…` : laid.node.label}
+                      </text>
+                      {/* 折叠/展开手柄 */}
+                      {laid.childCount > 0 && (
+                        <g className="cursor-pointer" onClick={() => toggleCollapse(nodeId)}>
+                          <circle
+                            cx={laid.x + NODE_W}
+                            cy={laid.y + NODE_H / 2}
+                            r={8}
+                            fill="#fff"
+                            stroke={meta.color}
+                            strokeWidth={1.2}
+                          />
+                          <text
+                            x={laid.x + NODE_W}
+                            y={laid.y + NODE_H / 2 + 3.5}
+                            textAnchor="middle"
+                            fontSize={laid.collapsed ? 10 : 12}
+                            fill={meta.color}
+                            pointerEvents="none"
+                          >
+                            {laid.collapsed ? laid.childCount : '−'}
+                          </text>
+                        </g>
+                      )}
+                      {/* 悬停时的「+」:新建子节点 */}
+                      {hoverNodeId === nodeId && !dragState && (
+                        <g className="cursor-pointer" onClick={() => promptAddChild(nodeId, laid.node.type)}>
+                          <circle cx={laid.x + NODE_W + 26} cy={laid.y + NODE_H / 2} r={9} fill="#2563eb" />
+                          <text
+                            x={laid.x + NODE_W + 26}
+                            y={laid.y + NODE_H / 2 + 4}
+                            textAnchor="middle"
+                            fontSize={13}
+                            fill="#fff"
+                            pointerEvents="none"
+                          >
+                            +
+                          </text>
+                        </g>
                       )}
                     </g>
                   )
                 })}
-                {/* 根节点 */}
-                <g>
-                  <rect x={10} y={layout.rootY} width={ROOT_W} height={NODE_H} rx={12} fill="#1e293b" />
-                  <text x={10 + ROOT_W / 2} y={layout.rootY + NODE_H / 2 + 4} textAnchor="middle" fontSize={13} fill="#fff">
-                    {layout.title.length > 10 ? `${layout.title.slice(0, 10)}…` : layout.title}
-                  </text>
-                </g>
-                {/* 类型组节点 */}
-                {layout.groups.map((group) => {
-                  const meta = typeMeta(group.type)
-                  return (
-                    <g key={group.type}>
-                      <rect x={group.x} y={group.y} width={GROUP_W} height={NODE_H} rx={10} fill={meta.color} fillOpacity={0.15} stroke={meta.color} />
-                      <text x={group.x + GROUP_W / 2} y={group.y + NODE_H / 2 + 4} textAnchor="middle" fontSize={12} fill={meta.color}>
-                        {meta.name} · {group.nodes.length}
-                      </text>
-                    </g>
-                  )
-                })}
-                {/* 内容节点 */}
-                {layout.groups.map((group) =>
-                  group.nodes.map((laid) => {
-                    const meta = typeMeta(laid.node.type)
-                    const isSelected = selected?.node_id === laid.node.node_id
-                    const isInherited = laid.node.branch_scope !== branchId
-                    const isOverridden = overriddenIds.has(laid.node.node_id)
-                    return (
-                      <g
-                        key={laid.node.node_id}
-                        onClick={() => selectNode(laid.node)}
-                        className="cursor-pointer"
-                      >
-                        <rect
-                          x={laid.x}
-                          y={laid.y}
-                          width={NODE_W}
-                          height={NODE_H}
-                          rx={8}
-                          fill={isInherited ? '#f8fafc' : '#fff'}
-                          stroke={isSelected ? '#2563eb' : meta.color}
-                          strokeWidth={isSelected ? 2.5 : 1.2}
-                          strokeDasharray={isInherited ? '4 3' : undefined}
-                        />
-                        {isOverridden && (
-                          <circle cx={laid.x + NODE_W - 8} cy={laid.y + 8} r={3.5} fill="#2563eb" />
-                        )}
-                        <circle cx={laid.x + 12} cy={laid.y + NODE_H / 2} r={4} fill={meta.color} />
-                        <text x={laid.x + 24} y={laid.y + NODE_H / 2 + 4} fontSize={12} fill="#334155">
-                          {laid.node.label.length > 11 ? `${laid.node.label.slice(0, 11)}…` : laid.node.label}
-                        </text>
-                      </g>
-                    )
-                  })
-                )}
               </g>
             </svg>
           ) : (
@@ -803,23 +1175,24 @@ export default function NovelStudioPage() {
         </div>
 
         <div className="w-full space-y-4 lg:w-96">
-          {layout && layout.groups.length > 0 && (
+          {typeCounts.length > 0 && (
             <div className="rounded-xl border border-gray-200 bg-white p-4 text-slate-800">
               <h2 className="text-sm font-semibold text-gray-500">图例 · 节点类型</h2>
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
-                {layout.groups.map((group) => {
-                  const meta = typeMeta(group.type)
+                {typeCounts.map(([type, count]) => {
+                  const meta = typeMeta(type)
                   return (
-                    <span key={group.type} className="flex items-center gap-1.5 text-xs">
+                    <span key={type} className="flex items-center gap-1.5 text-xs">
                       <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: meta.color }} />
                       {meta.name}
-                      <span className="text-gray-400">{group.nodes.length}</span>
+                      <span className="text-gray-400">{count}</span>
                     </span>
                   )
                 })}
               </div>
               <div className="mt-2 space-y-1 border-t border-gray-100 pt-2 text-xs text-gray-400">
-                <p>类型由输入文本自动判定,可在节点详情中修改;粉色虚线表示节点间的从属/关联关系。</p>
+                <p>悬停节点点「+」加子节点;拖节点到另一节点可改挂父级,拖到空白处提升为顶层;节点右侧圆圈可折叠/展开。</p>
+                <p>类型由输入文本自动判定,可在节点详情中修改;粉色虚线是非层级的关联关系。</p>
                 <p>
                   <span className="mr-1 inline-block h-2.5 w-4 rounded-sm border border-dashed border-gray-400 bg-slate-50 align-middle" />
                   虚线灰底 = 继承自父分支(改动会自动生成本分支副本)
@@ -888,13 +1261,28 @@ export default function NovelStudioPage() {
                 )}
                 {overriddenIds.has(selected.node_id) && <span className="ml-1 text-blue-600">(本分支已覆写)</span>}
               </p>
-              <div className="mt-2 flex gap-2">
+              <div className="mt-2 flex flex-wrap gap-2">
                 <button
                   onClick={saveNode}
                   disabled={busy}
                   className="rounded-md bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
                 >
                   保存
+                </button>
+                <button
+                  onClick={() => promptAddChild(selected.node_id, selected.type)}
+                  disabled={busy}
+                  className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  + 子节点
+                </button>
+                <button
+                  onClick={() => reparentNode(selected.node_id, null)}
+                  disabled={busy || !nodePositions.get(selected.node_id)?.parentId}
+                  className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-gray-50 disabled:opacity-50"
+                  title="脱离当前父节点,变成顶层节点"
+                >
+                  提升为顶层
                 </button>
                 <button
                   onClick={deleteNode}
@@ -904,6 +1292,32 @@ export default function NovelStudioPage() {
                   删除节点
                 </button>
               </div>
+              {TEMPLATES[selected.type] && (
+                <div className="mt-2 border-t border-gray-100 pt-2">
+                  <p className="text-xs text-gray-400">
+                    快捷模板:一键为「{typeMeta(selected.type).name}」补齐常用子节点
+                  </p>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    <button
+                      onClick={() => addTemplateChildren(selected.node_id, selected.type)}
+                      disabled={busy}
+                      className="rounded border border-blue-300 px-2 py-0.5 text-xs text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                    >
+                      + {TEMPLATES[selected.type].map((item) => item.label).join(' / ')}
+                    </button>
+                    {TEMPLATES[selected.type].map((item) => (
+                      <button
+                        key={item.label}
+                        onClick={() => addChildNode(selected.node_id, item.label, item.type)}
+                        disabled={busy}
+                        className="rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        + {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

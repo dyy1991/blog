@@ -34,7 +34,10 @@ export const EdgeSchema = z.object({
   to_node_id: z.string(),
   label: z.string(),
   status: NodeStatusSchema,
-  source_refs: z.array(SourceRefSchema).default([])
+  source_refs: z.array(SourceRefSchema).default([]),
+  // 博客端扩展:边的分支作用域,与节点同样走祖先链解析 + 写时复制。
+  // 老数据缺此字段时默认 'global'(对所有分支可见)。
+  branch_scope: z.string().default('global')
 }).strict();
 
 export const BranchSchema = z.object({

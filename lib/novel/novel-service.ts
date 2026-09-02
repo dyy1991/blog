@@ -12,6 +12,7 @@ import {
 import {
   ProjectRepository,
   branchChain,
+  resolveEdgesForBranch,
   resolveNodesForBranch,
   type ProjectSummary,
   type RevisionComparison
@@ -442,7 +443,8 @@ export class NovelService {
             to_node_id: child.node_id,
             label: '',
             status: 'provisional',
-            source_refs: []
+            source_refs: [],
+            branch_scope: branchId
           });
         }
       }
@@ -678,7 +680,9 @@ export class NovelService {
     const activeBranchId = branchId ?? state.active_branch_id;
     const { nodes, overriddenNodeIds } = resolveNodesForBranch(state, activeBranchId);
     const nodeIds = new Set(nodes.map((node) => node.node_id));
-    const edges = state.edges.filter((edge) => nodeIds.has(edge.from_node_id) && nodeIds.has(edge.to_node_id));
+    const edges = resolveEdgesForBranch(state, activeBranchId).filter(
+      (edge) => nodeIds.has(edge.from_node_id) && nodeIds.has(edge.to_node_id)
+    );
     const chain = branchChain(state, activeBranchId);
     const inheritedCount = nodes.filter((node) => node.branch_scope !== activeBranchId).length;
     return {
@@ -722,19 +726,71 @@ export class NovelService {
     });
   }
 
-  async deleteNode(projectId: string, nodeId: string, branchId?: string): Promise<ToolResult> {
+  async deleteNode(
+    projectId: string,
+    nodeId: string,
+    branchId?: string,
+    cascade = false
+  ): Promise<ToolResult> {
     const state = await this.repository.getProject(projectId);
     const targetBranch = branchId ?? state.active_branch_id;
-    const saved = await this.repository.deleteNode(projectId, targetBranch, nodeId);
+    const saved = await this.repository.deleteNode(projectId, targetBranch, nodeId, { cascade });
+    const warnings: string[] = [];
+    if (saved.tombstoned) {
+      warnings.push(`包含继承自父分支的节点,已在分支 ${targetBranch} 隐藏,父分支仍保留。`);
+    }
+    if (cascade && saved.removedCount > 1) {
+      warnings.push(`连同 ${saved.removedCount - 1} 个子孙节点一并移除。`);
+    }
     return toolResult({
       projectId,
       branchId: saved.revision.branch_id,
       revisionId: saved.revision.revision_id,
       summary: saved.revision.summary,
       graphDelta: saved.revision.delta,
-      warnings: saved.tombstoned
-        ? [`该节点继承自父分支,已在分支 ${targetBranch} 隐藏,父分支仍保留。`]
-        : []
+      warnings
+    });
+  }
+
+  /** 新建节点(可挂到指定父节点下) */
+  async createNode(
+    projectId: string,
+    input: { label: string; content?: string; type?: string; parent_node_id?: string | null },
+    branchId?: string
+  ): Promise<ToolResult> {
+    const state = await this.repository.getProject(projectId);
+    const targetBranch = branchId ?? state.active_branch_id;
+    const saved = await this.repository.createNode(projectId, targetBranch, {
+      label: input.label,
+      content: input.content,
+      type: input.type,
+      parentNodeId: input.parent_node_id ?? null
+    });
+    return toolResult({
+      projectId,
+      branchId: saved.revision.branch_id,
+      revisionId: saved.revision.revision_id,
+      summary: saved.revision.summary,
+      graphDelta: saved.revision.delta
+    });
+  }
+
+  /** 改变节点父级;parent_node_id 传 null 提升为顶层 */
+  async reparentNode(
+    projectId: string,
+    nodeId: string,
+    parentNodeId: string | null,
+    branchId?: string
+  ): Promise<ToolResult> {
+    const state = await this.repository.getProject(projectId);
+    const targetBranch = branchId ?? state.active_branch_id;
+    const saved = await this.repository.reparentNode(projectId, targetBranch, nodeId, parentNodeId);
+    return toolResult({
+      projectId,
+      branchId: saved.revision.branch_id,
+      revisionId: saved.revision.revision_id,
+      summary: saved.revision.summary,
+      graphDelta: saved.revision.delta
     });
   }
 
