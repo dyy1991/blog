@@ -482,12 +482,16 @@ export default function NovelStudioPage() {
   const collapseKey = projectId && branchId ? `novel-collapsed-${projectId}-${branchId}` : ''
   useEffect(() => {
     if (!collapseKey) return
-    try {
-      const saved = window.localStorage.getItem(collapseKey)
-      setCollapsed(new Set<string>(saved ? (JSON.parse(saved) as string[]) : []))
-    } catch {
-      setCollapsed(new Set())
-    }
+    // 放入宏任务回调:effect 体内同步 setState 会触发级联渲染(react-hooks/set-state-in-effect)
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = window.localStorage.getItem(collapseKey)
+        setCollapsed(new Set<string>(saved ? (JSON.parse(saved) as string[]) : []))
+      } catch {
+        setCollapsed(new Set())
+      }
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [collapseKey])
 
   const persistCollapsed = (next: Set<string>) => {
@@ -937,7 +941,9 @@ export default function NovelStudioPage() {
     return chain
   }, [matchedIds, forest])
 
-  const layout = useMemo(() => {
+  // 不手写 useMemo:依赖里有 Set/树结构,React Compiler 无法保留手动记忆化,
+  // 交给它自动记忆化反而更稳(react-hooks/preserve-manual-memoization)。
+  const layout = (() => {
     if (!graph || !forest) return null
     const project = projects.find((item) => item.project_id === projectId)
     // 搜索时临时展开命中节点的祖先链,保证命中项一定可见(不改动已保存的折叠状态)
@@ -945,20 +951,20 @@ export default function NovelStudioPage() {
       ? new Set([...collapsed].filter((id) => !matchedAncestors.has(id)))
       : collapsed
     return layoutTree(project?.title ?? projectId, forest.roots, effectiveCollapsed, forest.parentOf)
-  }, [graph, forest, projects, projectId, collapsed, matchedAncestors])
+  })()
 
   const overriddenIds = useMemo(
     () => new Set(graph?.graph.overridden_node_ids ?? []),
     [graph]
   )
 
-  const nodePositions = useMemo(() => {
+  const nodePositions = (() => {
     const map = new Map<string, LaidNode>()
     for (const laid of layout?.laid ?? []) {
       map.set(laid.node.node_id, laid)
     }
     return map
-  }, [layout])
+  })()
 
   const timeline = useMemo(() => {
     if (!graph || viewMode !== 'timeline') return null
