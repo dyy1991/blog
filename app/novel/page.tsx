@@ -84,6 +84,18 @@ const TYPE_META: Record<string, { name: string; color: string; deprecated?: bool
 /** 可供选择的节点类型(排除已弃用的) */
 const SELECTABLE_TYPES = Object.entries(TYPE_META).filter(([, meta]) => !meta.deprecated)
 
+/** 节点状态:定稿程度,用描边样式区分 */
+const STATUS_META: Record<string, { name: string; color: string; dash?: string }> = {
+  confirmed: { name: '已定稿', color: '#059669' },
+  provisional: { name: '待定', color: '#94a3b8', dash: '4 3' },
+  disputed: { name: '有冲突', color: '#dc2626', dash: '2 2' }
+}
+const STATUS_ORDER = ['confirmed', 'provisional', 'disputed'] as const
+
+function statusMeta(status: string) {
+  return STATUS_META[status] ?? { name: status, color: '#94a3b8' }
+}
+
 function typeMeta(type: string) {
   return TYPE_META[type] ?? { name: type, color: '#94a3b8' }
 }
@@ -395,6 +407,9 @@ export default function NovelStudioPage() {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [linkState, setLinkState] = useState<{ fromId: string; x: number; y: number; overId: string | null } | null>(null)
   const [viewMode, setViewMode] = useState<'mindmap' | 'timeline'>('mindmap')
+  const [search, setSearch] = useState('')
+  const [filterType, setFilterType] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
   const [linkType, setLinkType] = useState<string>('relation')
   const [linkTargetId, setLinkTargetId] = useState('')
   const [linkLabel, setLinkLabel] = useState('')
@@ -717,6 +732,17 @@ export default function NovelStudioPage() {
       await loadGraph(key, projectId, branchId)
     })
 
+  const setNodeStatus = (status: string) =>
+    run(async () => {
+      if (!selected) return
+      await api(key, `projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(selected.node_id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status, branch_id: branchId })
+      })
+      setSelected({ ...selected, status })
+      await loadGraph(key, projectId, branchId)
+    })
+
   const createEdge = (fromId: string, toId: string, type: string, label?: string) =>
     run(async () => {
       const post = (replace: boolean) =>
@@ -837,11 +863,53 @@ export default function NovelStudioPage() {
     return buildForest(graph.graph.nodes, graph.graph.edges)
   }, [graph])
 
+  const filterActive = Boolean(search.trim() || filterType || filterStatus)
+
+  /** 命中集合:关键词匹配名称或正文,叠加类型/状态筛选 */
+  const matchedIds = useMemo(() => {
+    if (!graph || !filterActive) return null
+    const keyword = search.trim().toLowerCase()
+    const hits = new Set<string>()
+    for (const node of graph.graph.nodes) {
+      if (filterType && node.type !== filterType) continue
+      if (filterStatus && node.status !== filterStatus) continue
+      if (
+        keyword &&
+        !node.label.toLowerCase().includes(keyword) &&
+        !node.content.toLowerCase().includes(keyword)
+      ) {
+        continue
+      }
+      hits.add(node.node_id)
+    }
+    return hits
+  }, [graph, search, filterType, filterStatus, filterActive])
+
+  /** 命中节点的祖先链(用于自动展开,让命中项一定可见) */
+  const matchedAncestors = useMemo(() => {
+    if (!matchedIds || !forest) return null
+    const chain = new Set<string>()
+    for (const id of matchedIds) {
+      let cursor = forest.parentOf.get(id)
+      const guard = new Set<string>()
+      while (cursor && !guard.has(cursor)) {
+        guard.add(cursor)
+        chain.add(cursor)
+        cursor = forest.parentOf.get(cursor)
+      }
+    }
+    return chain
+  }, [matchedIds, forest])
+
   const layout = useMemo(() => {
     if (!graph || !forest) return null
     const project = projects.find((item) => item.project_id === projectId)
-    return layoutTree(project?.title ?? projectId, forest.roots, collapsed, forest.parentOf)
-  }, [graph, forest, projects, projectId, collapsed])
+    // 搜索时临时展开命中节点的祖先链,保证命中项一定可见(不改动已保存的折叠状态)
+    const effectiveCollapsed = matchedAncestors
+      ? new Set([...collapsed].filter((id) => !matchedAncestors.has(id)))
+      : collapsed
+    return layoutTree(project?.title ?? projectId, forest.roots, effectiveCollapsed, forest.parentOf)
+  }, [graph, forest, projects, projectId, collapsed, matchedAncestors])
 
   const overriddenIds = useMemo(
     () => new Set(graph?.graph.overridden_node_ids ?? []),
@@ -1144,6 +1212,59 @@ export default function NovelStudioPage() {
         )}
       </div>
 
+      {/* 搜索与筛选 */}
+      {graph && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="搜索节点名称或正文…"
+            className="w-56 rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-slate-800 focus:border-blue-500 focus:outline-none"
+          />
+          <select
+            value={filterType}
+            onChange={(event) => setFilterType(event.target.value)}
+            className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-slate-800"
+          >
+            <option value="">全部类型</option>
+            {typeCounts.map(([type, count]) => (
+              <option key={type} value={type}>
+                {typeMeta(type).name}({count})
+              </option>
+            ))}
+          </select>
+          <select
+            value={filterStatus}
+            onChange={(event) => setFilterStatus(event.target.value)}
+            className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-slate-800"
+          >
+            <option value="">全部状态</option>
+            {STATUS_ORDER.map((value) => (
+              <option key={value} value={value}>
+                {STATUS_META[value].name}
+              </option>
+            ))}
+          </select>
+          {filterActive && (
+            <>
+              <span className="text-xs text-gray-400">
+                命中 {matchedIds?.size ?? 0} / {graph.graph.nodes.length}
+              </span>
+              <button
+                onClick={() => {
+                  setSearch('')
+                  setFilterType('')
+                  setFilterStatus('')
+                }}
+                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-100"
+              >
+                清除筛选
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {message && <p className="mt-2 text-sm text-red-500">{message}</p>}
       {busy && <p className="mt-2 text-sm text-gray-400">处理中…(模型生成可能需要 10-60 秒)</p>}
 
@@ -1210,7 +1331,10 @@ export default function NovelStudioPage() {
                     const nextItem = timeline.laid[index + 1]
                     const sameRow = nextItem && nextItem.row === item.row
                     return (
-                      <g key={item.node.node_id}>
+                      <g
+                        key={item.node.node_id}
+                        opacity={!matchedIds || matchedIds.has(item.node.node_id) ? 1 : 0.25}
+                      >
                         {sameRow && (
                           <line
                             x1={item.x + NODE_W}
@@ -1434,10 +1558,12 @@ export default function NovelStudioPage() {
                   const isOverridden = overriddenIds.has(nodeId)
                   const isDropTarget = dragState?.overId === nodeId || linkState?.overId === nodeId
                   const isDragging = dragState?.nodeId === nodeId
+                  const isMatched = !matchedIds || matchedIds.has(nodeId)
+                  const status = statusMeta(laid.node.status)
                   return (
                     <g
                       key={nodeId}
-                      opacity={isDragging ? 0.4 : 1}
+                      opacity={isDragging ? 0.4 : isMatched ? 1 : 0.25}
                       onPointerEnter={() => setHoverNodeId(nodeId)}
                       onPointerLeave={() => setHoverNodeId((current) => (current === nodeId ? null : current))}
                     >
@@ -1469,10 +1595,37 @@ export default function NovelStudioPage() {
                         onPointerDown={(event) => onNodePointerDown(event, nodeId)}
                         onClick={() => selectNode(laid.node)}
                       />
+                      {/* 命中高亮外框 */}
+                      {matchedIds && isMatched && (
+                        <rect
+                          x={laid.x - 3}
+                          y={laid.y - 3}
+                          width={NODE_W + 6}
+                          height={NODE_H + 6}
+                          rx={10}
+                          fill="none"
+                          stroke="#facc15"
+                          strokeWidth={3}
+                          pointerEvents="none"
+                        />
+                      )}
+                      {/* 状态条:左侧竖线,颜色/线型表示定稿程度 */}
+                      <line
+                        x1={laid.x + 3}
+                        y1={laid.y + 7}
+                        x2={laid.x + 3}
+                        y2={laid.y + NODE_H - 7}
+                        stroke={status.color}
+                        strokeWidth={3}
+                        strokeDasharray={status.dash}
+                        pointerEvents="none"
+                      >
+                        <title>{status.name}</title>
+                      </line>
                       {isOverridden && <circle cx={laid.x + NODE_W - 8} cy={laid.y + 8} r={3.5} fill="#2563eb" />}
-                      <circle cx={laid.x + 12} cy={laid.y + NODE_H / 2} r={4} fill={meta.color} pointerEvents="none" />
+                      <circle cx={laid.x + 14} cy={laid.y + NODE_H / 2} r={4} fill={meta.color} pointerEvents="none" />
                       <text
-                        x={laid.x + 24}
+                        x={laid.x + 26}
                         y={laid.y + NODE_H / 2 + 4}
                         fontSize={12}
                         fill="#334155"
@@ -1567,6 +1720,30 @@ export default function NovelStudioPage() {
                 <p>类型由输入文本自动判定,可在节点详情中修改。</p>
               </div>
               <div className="mt-2 border-t border-gray-100 pt-2">
+                <p className="text-xs text-gray-400">节点状态(左侧竖条)</p>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                  {STATUS_ORDER.map((value) => {
+                    const meta = STATUS_META[value]
+                    return (
+                      <span key={value} className="flex items-center gap-1 text-xs">
+                        <svg width="6" height="12">
+                          <line
+                            x1="3"
+                            y1="0"
+                            x2="3"
+                            y2="12"
+                            stroke={meta.color}
+                            strokeWidth="3"
+                            strokeDasharray={meta.dash}
+                          />
+                        </svg>
+                        {meta.name}
+                      </span>
+                    )
+                  })}
+                </div>
+              </div>
+              <div className="mt-2 border-t border-gray-100 pt-2">
                 <p className="text-xs text-gray-400">关系线</p>
                 <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
                   {EDGE_TYPES.map((type) => {
@@ -1651,8 +1828,30 @@ export default function NovelStudioPage() {
                 rows={7}
                 className="mt-2 w-full rounded-md border border-gray-300 bg-white p-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none"
               />
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-gray-400">状态</span>
+                {STATUS_ORDER.map((value) => {
+                  const meta = STATUS_META[value]
+                  const active = selected.status === value
+                  return (
+                    <button
+                      key={value}
+                      onClick={() => setNodeStatus(value)}
+                      disabled={busy || active}
+                      className="rounded border px-2 py-0.5 text-xs disabled:opacity-100"
+                      style={{
+                        borderColor: meta.color,
+                        backgroundColor: active ? meta.color : 'transparent',
+                        color: active ? '#fff' : meta.color
+                      }}
+                    >
+                      {meta.name}
+                    </button>
+                  )
+                })}
+              </div>
               <p className="mt-1 text-xs text-gray-400">
-                状态 {selected.status} · 来源分支 {selected.branch_scope}
+                来源分支 {selected.branch_scope}
                 {selected.branch_scope !== branchId && (
                   <span className="ml-1 text-amber-600">(继承,保存后将在 {branchId} 生成副本)</span>
                 )}
