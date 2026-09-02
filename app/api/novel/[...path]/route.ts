@@ -10,6 +10,9 @@ export const maxDuration = 300 // 模型生成草稿可能较慢
 
 type Body = Record<string, unknown>
 
+/** 可手动创建的关系类型(contains 由层级操作维护,不在此列) */
+const EDGE_TYPES = ['next', 'relation', 'conflict', 'reference']
+
 function unauthorized(): NextResponse {
   return NextResponse.json({ error: { message: '口令错误或未提供 (x-novel-key)' } }, { status: 401 })
 }
@@ -194,6 +197,29 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
           { status: 201 }
         )
       }
+      // POST /api/novel/projects/:id/edges  { from_node_id, to_node_id, type, label?, branch_id? }
+      if (path[2] === 'edges') {
+        const type = asString(body.type, 'relation')
+        if (!EDGE_TYPES.includes(type)) {
+          return NextResponse.json(
+            { error: { message: `关系类型必须是 ${EDGE_TYPES.join(' / ')} 之一` } },
+            { status: 400 }
+          )
+        }
+        return NextResponse.json(
+          await service.createEdge(
+            projectId,
+            {
+              from_node_id: asString(body.from_node_id),
+              to_node_id: asString(body.to_node_id),
+              type,
+              label: asOptionalString(body.label)
+            },
+            asOptionalString(body.branch_id)
+          ),
+          { status: 201 }
+        )
+      }
       // POST /api/novel/projects/:id/import
       if (path[2] === 'import') {
         return NextResponse.json(
@@ -253,6 +279,25 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ path: str
         )
       )
     }
+    // PATCH /api/novel/projects/:id/edges/:edgeId  { label?, type? }
+    if (path.length === 4 && path[0] === 'projects' && path[2] === 'edges') {
+      const body = await readBody(req)
+      const type = asOptionalString(body.type)
+      if (type && !EDGE_TYPES.includes(type)) {
+        return NextResponse.json(
+          { error: { message: `关系类型必须是 ${EDGE_TYPES.join(' / ')} 之一` } },
+          { status: 400 }
+        )
+      }
+      return NextResponse.json(
+        await service.updateEdge(
+          path[1],
+          path[3],
+          { label: asOptionalString(body.label), type },
+          asOptionalString(body.branch_id)
+        )
+      )
+    }
     // PATCH /api/novel/projects/:id/drafts/:draftId  { status: 'accepted' | 'rejected' }
     if (path.length === 4 && path[0] === 'projects' && path[2] === 'drafts') {
       const body = await readBody(req)
@@ -283,6 +328,10 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ path: st
       return NextResponse.json(
         await service.deleteNode(path[1], path[3], branchParam, params.get('cascade') === 'true')
       )
+    }
+    // DELETE /api/novel/projects/:id/edges/:edgeId?branch_id=
+    if (path.length === 4 && path[0] === 'projects' && path[2] === 'edges') {
+      return NextResponse.json(await service.deleteEdge(path[1], path[3], branchParam))
     }
     // DELETE /api/novel/projects/:id/drafts/:draftId
     if (path.length === 4 && path[0] === 'projects' && path[2] === 'drafts') {

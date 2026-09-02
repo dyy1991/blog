@@ -775,6 +775,55 @@ export class NovelService {
     });
   }
 
+  /** 创建关系边:next(顺序)/ relation(关系)/ conflict(冲突)/ reference(引用) */
+  async createEdge(
+    projectId: string,
+    input: { from_node_id: string; to_node_id: string; type: string; label?: string },
+    branchId?: string
+  ): Promise<ToolResult> {
+    const state = await this.repository.getProject(projectId);
+    const targetBranch = branchId ?? state.active_branch_id;
+    const saved = await this.repository.createEdge(projectId, targetBranch, input);
+    return toolResult({
+      projectId,
+      branchId: saved.revision.branch_id,
+      revisionId: saved.revision.revision_id,
+      summary: saved.revision.summary,
+      graphDelta: saved.revision.delta
+    });
+  }
+
+  async updateEdge(
+    projectId: string,
+    edgeId: string,
+    patch: { label?: string; type?: string },
+    branchId?: string
+  ): Promise<ToolResult> {
+    const state = await this.repository.getProject(projectId);
+    const targetBranch = branchId ?? state.active_branch_id;
+    const saved = await this.repository.updateEdge(projectId, targetBranch, edgeId, patch);
+    return toolResult({
+      projectId,
+      branchId: saved.revision.branch_id,
+      revisionId: saved.revision.revision_id,
+      summary: saved.revision.summary,
+      graphDelta: saved.revision.delta
+    });
+  }
+
+  async deleteEdge(projectId: string, edgeId: string, branchId?: string): Promise<ToolResult> {
+    const state = await this.repository.getProject(projectId);
+    const targetBranch = branchId ?? state.active_branch_id;
+    const saved = await this.repository.deleteEdge(projectId, targetBranch, edgeId);
+    return toolResult({
+      projectId,
+      branchId: saved.revision.branch_id,
+      revisionId: saved.revision.revision_id,
+      summary: saved.revision.summary,
+      graphDelta: saved.revision.delta
+    });
+  }
+
   /** 改变节点父级;parent_node_id 传 null 提升为顶层 */
   async reparentNode(
     projectId: string,

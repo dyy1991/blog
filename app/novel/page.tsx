@@ -101,6 +101,19 @@ function ExpandButton({ onClick, label = '放大查看' }: { onClick: () => void
 
 type ModalKind = 'intake' | 'node' | 'readonly'
 
+/** 关系边类型:contains 由层级维护,其余可手动创建 */
+const EDGE_META: Record<string, { name: string; color: string; dashed: boolean }> = {
+  next: { name: '顺序', color: '#0ea5e9', dashed: false },
+  relation: { name: '关系', color: '#ec4899', dashed: true },
+  conflict: { name: '冲突', color: '#ef4444', dashed: true },
+  reference: { name: '引用', color: '#94a3b8', dashed: true }
+}
+const EDGE_TYPES = ['next', 'relation', 'conflict', 'reference'] as const
+
+function edgeMeta(type: string) {
+  return EDGE_META[type] ?? { name: type, color: '#94a3b8', dashed: true }
+}
+
 /** 按父节点类型提供的快捷子节点模板 */
 const TEMPLATES: Record<string, Array<{ label: string; type: string }>> = {
   character: [
@@ -183,18 +196,50 @@ function buildForest(nodes: NodeT[], edges: EdgeT[]): { roots: TreeNode[]; paren
     childrenOf.set(edge.from_node_id, list)
   }
 
+  // next 边:在兄弟节点内部决定先后顺序
+  const nextOf = new Map<string, string>()
+  const hasPrev = new Set<string>()
+  for (const edge of edges) {
+    if (edge.type !== 'next') continue
+    if (!byId.has(edge.from_node_id) || !byId.has(edge.to_node_id)) continue
+    if (nextOf.has(edge.from_node_id)) continue
+    nextOf.set(edge.from_node_id, edge.to_node_id)
+    hasPrev.add(edge.to_node_id)
+  }
+
+  /** 同组内按 next 链排序:链头依原序出现,链上后继紧随其后 */
+  const orderBySequence = (ids: string[]): string[] => {
+    const group = new Set(ids)
+    const result: string[] = []
+    const placed = new Set<string>()
+    for (const id of ids) {
+      if (placed.has(id) || hasPrev.has(id)) continue
+      let cursor: string | undefined = id
+      while (cursor && group.has(cursor) && !placed.has(cursor)) {
+        result.push(cursor)
+        placed.add(cursor)
+        cursor = nextOf.get(cursor)
+      }
+    }
+    // 处于环中或链头不在本组的节点,按原序补齐
+    for (const id of ids) {
+      if (!placed.has(id)) {
+        result.push(id)
+        placed.add(id)
+      }
+    }
+    return result
+  }
+
   const build = (id: string, seen: Set<string>): TreeNode => {
     seen.add(id)
-    const children = (childrenOf.get(id) ?? [])
-      .filter((childId) => !seen.has(childId))
-      .map((childId) => build(childId, seen))
-    return { node: byId.get(id)!, children }
+    const childIds = orderBySequence((childrenOf.get(id) ?? []).filter((childId) => !seen.has(childId)))
+    return { node: byId.get(id)!, children: childIds.map((childId) => build(childId, seen)) }
   }
 
   const seen = new Set<string>()
-  const roots = nodes
-    .filter((node) => !parentOf.has(node.node_id))
-    .map((node) => build(node.node_id, seen))
+  const rootIds = orderBySequence(nodes.filter((node) => !parentOf.has(node.node_id)).map((node) => node.node_id))
+  const roots = rootIds.map((id) => build(id, seen))
 
   return { roots, parentOf }
 }
@@ -252,6 +297,47 @@ function layoutTree(title: string, roots: TreeNode[], collapsed: Set<string>, pa
   return { laid, rootY, width: maxX + 60, height, title, topLevelIds: roots.map((root) => root.node.node_id) }
 }
 
+/** 时间线布局:把每条 next 链横向平铺成一行 */
+function layoutTimeline(nodes: NodeT[], edges: EdgeT[]) {
+  const byId = new Map(nodes.map((node) => [node.node_id, node]))
+  const nextOf = new Map<string, string>()
+  const hasPrev = new Set<string>()
+  for (const edge of edges) {
+    if (edge.type !== 'next') continue
+    if (!byId.has(edge.from_node_id) || !byId.has(edge.to_node_id)) continue
+    if (nextOf.has(edge.from_node_id)) continue
+    nextOf.set(edge.from_node_id, edge.to_node_id)
+    hasPrev.add(edge.to_node_id)
+  }
+
+  const inChain = new Set<string>([...nextOf.keys(), ...hasPrev])
+  const chains: NodeT[][] = []
+  const placed = new Set<string>()
+  for (const node of nodes) {
+    if (!inChain.has(node.node_id) || hasPrev.has(node.node_id) || placed.has(node.node_id)) continue
+    const chain: NodeT[] = []
+    let cursor: string | undefined = node.node_id
+    while (cursor && byId.has(cursor) && !placed.has(cursor)) {
+      chain.push(byId.get(cursor)!)
+      placed.add(cursor)
+      cursor = nextOf.get(cursor)
+    }
+    chains.push(chain)
+  }
+
+  const laid: Array<{ node: NodeT; x: number; y: number; row: number; index: number }> = []
+  const rowGap = NODE_H + 56
+  chains.forEach((chain, row) => {
+    chain.forEach((node, index) => {
+      laid.push({ node, x: 40 + index * (NODE_W + 56), y: 40 + row * rowGap, row, index })
+    })
+  })
+
+  const width = Math.max(...laid.map((item) => item.x + NODE_W), 400) + 60
+  const height = Math.max(chains.length * rowGap + 80, 320)
+  return { laid, chains, width, height }
+}
+
 async function api<T>(key: string, path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/novel/${path}`, {
     ...init,
@@ -295,6 +381,12 @@ export default function NovelStudioPage() {
   const [openDraftId, setOpenDraftId] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [hoverNodeId, setHoverNodeId] = useState<string | null>(null)
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
+  const [linkState, setLinkState] = useState<{ fromId: string; x: number; y: number; overId: string | null } | null>(null)
+  const [viewMode, setViewMode] = useState<'mindmap' | 'timeline'>('mindmap')
+  const [linkType, setLinkType] = useState<string>('relation')
+  const [linkTargetId, setLinkTargetId] = useState('')
+  const [linkLabel, setLinkLabel] = useState('')
   const [dragState, setDragState] = useState<
     { nodeId: string; x: number; y: number; startX: number; startY: number; moved: boolean; overId: string | null } | null
   >(null)
@@ -614,6 +706,42 @@ export default function NovelStudioPage() {
       await loadGraph(key, projectId, branchId)
     })
 
+  const createEdge = (fromId: string, toId: string, type: string, label?: string) =>
+    run(async () => {
+      await api(key, `projects/${encodeURIComponent(projectId)}/edges`, {
+        method: 'POST',
+        body: JSON.stringify({ from_node_id: fromId, to_node_id: toId, type, label, branch_id: branchId })
+      })
+      await loadGraph(key, projectId, branchId)
+    })
+
+  const removeEdge = (edgeId: string) =>
+    run(async () => {
+      await api(
+        key,
+        `projects/${encodeURIComponent(projectId)}/edges/${encodeURIComponent(edgeId)}?branch_id=${encodeURIComponent(branchId)}`,
+        { method: 'DELETE' }
+      )
+      if (selectedEdgeId === edgeId) setSelectedEdgeId(null)
+      await loadGraph(key, projectId, branchId)
+    })
+
+  /** 拖拽连线松手后:选类型和标签 */
+  const finishLink = (fromId: string, toId: string) => {
+    const typeInput = window.prompt(
+      '关系类型:\n  1 = 顺序(主线先后)\n  2 = 关系(角色/势力)\n  3 = 冲突\n  4 = 引用',
+      '1'
+    )
+    if (!typeInput) return
+    const type = { '1': 'next', '2': 'relation', '3': 'conflict', '4': 'reference' }[typeInput.trim()]
+    if (!type) {
+      setMessage('未识别的关系类型,已取消')
+      return
+    }
+    const label = type === 'next' ? '' : window.prompt('关系标签(可留空,如「师徒」「宿敌」):') ?? ''
+    createEdge(fromId, toId, type, label)
+  }
+
   const reparentNode = (nodeId: string, parentNodeId: string | null) =>
     run(async () => {
       await api(key, `projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(nodeId)}`, {
@@ -700,6 +828,28 @@ export default function NovelStudioPage() {
     return map
   }, [layout])
 
+  const timeline = useMemo(() => {
+    if (!graph || viewMode !== 'timeline') return null
+    return layoutTimeline(graph.graph.nodes, graph.graph.edges)
+  }, [graph, viewMode])
+
+  /** 选中节点的非层级关系(双向) */
+  const nodeEdges = useMemo(() => {
+    if (!selected || !graph) return []
+    const byId = new Map(graph.graph.nodes.map((node) => [node.node_id, node]))
+    return graph.graph.edges
+      .filter(
+        (edge) =>
+          edge.type !== 'contains' &&
+          (edge.from_node_id === selected.node_id || edge.to_node_id === selected.node_id)
+      )
+      .map((edge) => ({
+        edge,
+        direction: edge.from_node_id === selected.node_id ? ('out' as const) : ('in' as const),
+        other: byId.get(edge.from_node_id === selected.node_id ? edge.to_node_id : edge.from_node_id)
+      }))
+  }, [selected, graph])
+
   /** 图例仍按类型统计,数据源改为可见节点 */
   const typeCounts = useMemo(() => {
     const counts = new Map<string, number>()
@@ -743,12 +893,25 @@ export default function NovelStudioPage() {
     ;(event.target as Element).releasePointerCapture?.(event.pointerId)
   }
 
+  const onLinkPointerDown = (event: React.PointerEvent<SVGCircleElement>, nodeId: string) => {
+    event.stopPropagation()
+    const point = toGraphPoint(event.clientX, event.clientY)
+    setLinkState({ fromId: nodeId, x: point.x, y: point.y, overId: null })
+    ;(event.target as Element).releasePointerCapture?.(event.pointerId)
+  }
+
   const onPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
-    if (dragState) return
+    if (dragState || linkState) return
+    setSelectedEdgeId(null)
     dragRef.current = { startX: event.clientX, startY: event.clientY, baseX: pan.x, baseY: pan.y }
   }
 
   const onPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (linkState) {
+      const point = toGraphPoint(event.clientX, event.clientY)
+      setLinkState({ ...linkState, x: point.x, y: point.y, overId: nodeAt(point.x, point.y, linkState.fromId) })
+      return
+    }
     if (dragState) {
       const point = toGraphPoint(event.clientX, event.clientY)
       // 位移超过 5px 才算拖拽,避免单击被误判成「拖到空白 → 提升为顶层」
@@ -770,6 +933,12 @@ export default function NovelStudioPage() {
   }
 
   const onPointerUp = () => {
+    if (linkState) {
+      const { fromId, overId } = linkState
+      setLinkState(null)
+      if (overId) finishLink(fromId, overId)
+      return
+    }
     if (dragState) {
       const { nodeId, overId, moved } = dragState
       const currentParent = nodePositions.get(nodeId)?.parentId ?? null
@@ -893,6 +1062,19 @@ export default function NovelStudioPage() {
               </span>
             )}
             <div className="ml-auto flex items-center gap-2">
+              <div className="flex overflow-hidden rounded-md border border-gray-300">
+                {(['mindmap', 'timeline'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setViewMode(mode)}
+                    className={`px-2 py-1 text-xs ${
+                      viewMode === mode ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 hover:bg-gray-100'
+                    }`}
+                  >
+                    {mode === 'mindmap' ? '思维导图' : '时间线'}
+                  </button>
+                ))}
+              </div>
               <button onClick={() => setZoom((value) => Math.min(value * 1.2, 3))} className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-slate-800">
                 +
               </button>
@@ -973,7 +1155,75 @@ export default function NovelStudioPage() {
 
       <div className="mt-4 flex flex-col gap-4 lg:flex-row">
         <div className="h-[calc(100vh-16rem)] min-h-[520px] flex-1 overflow-hidden rounded-xl border border-gray-200 bg-white">
-          {layout && graph ? (
+          {viewMode === 'timeline' && graph ? (
+            timeline && timeline.chains.length > 0 ? (
+              <svg
+                ref={svgRef}
+                width="100%"
+                height="100%"
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerLeave={onPointerUp}
+                className="cursor-grab touch-none select-none active:cursor-grabbing"
+              >
+                <defs>
+                  <marker id="tl-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill={EDGE_META.next.color} />
+                  </marker>
+                </defs>
+                <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+                  {timeline.chains.map((chain, row) => (
+                    <text key={`row-${row}`} x={12} y={40 + row * (NODE_H + 56) - 8} fontSize={11} fill="#94a3b8">
+                      线 {row + 1} · {chain.length} 节
+                    </text>
+                  ))}
+                  {timeline.laid.map((item, index) => {
+                    const nextItem = timeline.laid[index + 1]
+                    const sameRow = nextItem && nextItem.row === item.row
+                    return (
+                      <g key={item.node.node_id}>
+                        {sameRow && (
+                          <line
+                            x1={item.x + NODE_W}
+                            y1={item.y + NODE_H / 2}
+                            x2={nextItem.x}
+                            y2={nextItem.y + NODE_H / 2}
+                            stroke={EDGE_META.next.color}
+                            strokeWidth={2}
+                            markerEnd="url(#tl-arrow)"
+                          />
+                        )}
+                        <rect
+                          x={item.x}
+                          y={item.y}
+                          width={NODE_W}
+                          height={NODE_H}
+                          rx={8}
+                          fill={item.node.branch_scope !== branchId ? '#f8fafc' : '#fff'}
+                          stroke={selected?.node_id === item.node.node_id ? '#2563eb' : typeMeta(item.node.type).color}
+                          strokeWidth={selected?.node_id === item.node.node_id ? 2.5 : 1.2}
+                          className="cursor-pointer"
+                          onClick={() => selectNode(item.node)}
+                        />
+                        <circle cx={item.x + 12} cy={item.y + NODE_H / 2} r={4} fill={typeMeta(item.node.type).color} pointerEvents="none" />
+                        <text x={item.x + 24} y={item.y + NODE_H / 2 + 4} fontSize={12} fill="#334155" pointerEvents="none">
+                          {item.node.label.length > 12 ? `${item.node.label.slice(0, 12)}…` : item.node.label}
+                        </text>
+                        <text x={item.x + NODE_W - 8} y={item.y + 14} fontSize={10} fill="#94a3b8" textAnchor="end" pointerEvents="none">
+                          {item.index + 1}
+                        </text>
+                      </g>
+                    )
+                  })}
+                </g>
+              </svg>
+            ) : (
+              <div className="flex h-full items-center justify-center px-8 text-center text-sm text-gray-400">
+                还没有顺序关系。在思维导图里拖节点底部的蓝色圆点到下一个节点,选「顺序」即可串成时间线。
+              </div>
+            )
+          ) : layout && graph ? (
             <svg
               ref={svgRef}
               width="100%"
@@ -984,6 +1234,19 @@ export default function NovelStudioPage() {
               onPointerLeave={onPointerUp}
               className="cursor-grab touch-none select-none active:cursor-grabbing"
             >
+              <defs>
+                <marker
+                  id="seq-arrow"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="5"
+                  markerHeight="5"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill={EDGE_META.next.color} />
+                </marker>
+              </defs>
               <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
                 {/* 根 → 顶层节点 连线 */}
                 {layout.laid
@@ -1017,35 +1280,73 @@ export default function NovelStudioPage() {
                     />
                   )
                 })}
-                {/* 非层级关系边(粉色虚线) */}
+                {/* 非层级关系边:next 走左侧竖向带箭头,其余走右侧曲线 */}
                 {graph.graph.edges
                   .filter((edge) => edge.type !== 'contains')
                   .map((edge) => {
                     const from = nodePositions.get(edge.from_node_id)
                     const to = nodePositions.get(edge.to_node_id)
                     if (!from || !to) return null
+                    const meta = edgeMeta(edge.type)
+                    const isSelected = selectedEdgeId === edge.edge_id
+
+                    if (edge.type === 'next') {
+                      // 顺序链:从上一节点底部连到下一节点顶部,箭头指向后继
+                      const x1 = from.x + NODE_W / 2
+                      const y1 = from.y + NODE_H
+                      const x2 = to.x + NODE_W / 2
+                      const y2 = to.y
+                      const mid = (y1 + y2) / 2
+                      return (
+                        <g key={edge.edge_id} className="cursor-pointer" onClick={() => setSelectedEdgeId(edge.edge_id)}>
+                          <path
+                            d={`M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}`}
+                            fill="none"
+                            stroke={meta.color}
+                            strokeWidth={isSelected ? 3 : 2}
+                            markerEnd="url(#seq-arrow)"
+                          />
+                          {edge.label && (
+                            <text x={(x1 + x2) / 2 + 6} y={mid} fontSize={10} fill={meta.color}>
+                              {edge.label}
+                            </text>
+                          )}
+                        </g>
+                      )
+                    }
+
                     const x1 = from.x + NODE_W
                     const y1 = from.y + NODE_H / 2
                     const x2 = to.x + NODE_W
                     const y2 = to.y + NODE_H / 2
                     const bend = 60 + Math.abs(y2 - y1) / 4
                     return (
-                      <g key={edge.edge_id}>
+                      <g key={edge.edge_id} className="cursor-pointer" onClick={() => setSelectedEdgeId(edge.edge_id)}>
                         <path
                           d={`M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 + bend} ${y2}, ${x2} ${y2}`}
                           fill="none"
-                          stroke="#f472b6"
-                          strokeDasharray="4 3"
-                          strokeWidth={1.2}
+                          stroke={meta.color}
+                          strokeDasharray={meta.dashed ? '4 3' : undefined}
+                          strokeWidth={isSelected ? 2.6 : 1.4}
                         />
                         {edge.label && (
-                          <text x={Math.max(x1, x2) + bend - 4} y={(y1 + y2) / 2} fontSize={10} fill="#db2777">
+                          <text x={Math.max(x1, x2) + bend - 4} y={(y1 + y2) / 2} fontSize={10} fill={meta.color}>
                             {edge.label}
                           </text>
                         )}
                       </g>
                     )
                   })}
+                {/* 连线预览 */}
+                {linkState && nodePositions.get(linkState.fromId) && (
+                  <path
+                    d={`M ${nodePositions.get(linkState.fromId)!.x + NODE_W / 2} ${nodePositions.get(linkState.fromId)!.y + NODE_H} L ${linkState.x} ${linkState.y}`}
+                    stroke="#0ea5e9"
+                    strokeWidth={2}
+                    strokeDasharray="5 4"
+                    fill="none"
+                  />
+                )}
                 {/* 拖拽时的指示线 */}
                 {dragState && nodePositions.get(dragState.nodeId) && (
                   <path
@@ -1103,7 +1404,7 @@ export default function NovelStudioPage() {
                   const isSelected = selected?.node_id === nodeId
                   const isInherited = laid.node.branch_scope !== branchId
                   const isOverridden = overriddenIds.has(nodeId)
-                  const isDropTarget = dragState?.overId === nodeId
+                  const isDropTarget = dragState?.overId === nodeId || linkState?.overId === nodeId
                   const isDragging = dragState?.nodeId === nodeId
                   return (
                     <g
@@ -1127,7 +1428,13 @@ export default function NovelStudioPage() {
                         height={NODE_H}
                         rx={8}
                         fill={isDropTarget ? '#eff6ff' : isInherited ? '#f8fafc' : '#fff'}
-                        stroke={isDropTarget ? '#2563eb' : isSelected ? '#2563eb' : meta.color}
+                        stroke={
+                          linkState?.overId === nodeId
+                            ? '#0ea5e9'
+                            : isDropTarget || isSelected
+                              ? '#2563eb'
+                              : meta.color
+                        }
                         strokeWidth={isDropTarget ? 3 : isSelected ? 2.5 : 1.2}
                         strokeDasharray={isInherited ? '4 3' : undefined}
                         className="cursor-grab"
@@ -1168,8 +1475,23 @@ export default function NovelStudioPage() {
                           </text>
                         </g>
                       )}
+                      {/* 悬停时的底部手柄:拖到目标节点建立关系边 */}
+                      {(hoverNodeId === nodeId || linkState?.fromId === nodeId) && !dragState && (
+                        <circle
+                          cx={laid.x + NODE_W / 2}
+                          cy={laid.y + NODE_H}
+                          r={6}
+                          fill="#fff"
+                          stroke="#0ea5e9"
+                          strokeWidth={2}
+                          className="cursor-crosshair"
+                          onPointerDown={(event) => onLinkPointerDown(event, nodeId)}
+                        >
+                          <title>拖到另一个节点建立关系(顺序/关系/冲突/引用)</title>
+                        </circle>
+                      )}
                       {/* 悬停时的「+」:新建子节点 */}
-                      {hoverNodeId === nodeId && !dragState && (
+                      {hoverNodeId === nodeId && !dragState && !linkState && (
                         <g className="cursor-pointer" onClick={() => promptAddChild(nodeId, laid.node.type)}>
                           <circle cx={laid.x + NODE_W + 26} cy={laid.y + NODE_H / 2} r={9} fill="#2563eb" />
                           <text
@@ -1213,8 +1535,33 @@ export default function NovelStudioPage() {
                 })}
               </div>
               <div className="mt-2 space-y-1 border-t border-gray-100 pt-2 text-xs text-gray-400">
-                <p>悬停节点点「+」加子节点;拖节点到另一节点可改挂父级,拖到空白处提升为顶层;节点右侧圆圈可折叠/展开。</p>
-                <p>类型由输入文本自动判定,可在节点详情中修改;粉色虚线是非层级的关联关系。</p>
+                <p>悬停节点点「+」加子节点;拖节点本体改挂父级(拖到空白处提升为顶层);拖底部蓝点到另一节点建立关系;右侧圆圈折叠/展开。</p>
+                <p>类型由输入文本自动判定,可在节点详情中修改。</p>
+              </div>
+              <div className="mt-2 border-t border-gray-100 pt-2">
+                <p className="text-xs text-gray-400">关系线</p>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                  {EDGE_TYPES.map((type) => {
+                    const meta = edgeMeta(type)
+                    return (
+                      <span key={type} className="flex items-center gap-1 text-xs">
+                        <svg width="18" height="6">
+                          <line
+                            x1="0"
+                            y1="3"
+                            x2="18"
+                            y2="3"
+                            stroke={meta.color}
+                            strokeWidth="2"
+                            strokeDasharray={meta.dashed ? '3 2' : undefined}
+                          />
+                        </svg>
+                        {meta.name}
+                        {type === 'next' && <span className="text-gray-400">(带箭头,决定排序)</span>}
+                      </span>
+                    )
+                  })}
+                </div>
                 <p>
                   <span className="mr-1 inline-block h-2.5 w-4 rounded-sm border border-dashed border-gray-400 bg-slate-50 align-middle" />
                   虚线灰底 = 继承自父分支(改动会自动生成本分支副本)
@@ -1314,6 +1661,80 @@ export default function NovelStudioPage() {
                   删除节点
                 </button>
               </div>
+              {/* 关系管理 */}
+              <div className="mt-2 border-t border-gray-100 pt-2">
+                <p className="text-xs text-gray-400">关系(不含层级)</p>
+                {nodeEdges.length > 0 && (
+                  <ul className="mt-1 space-y-1">
+                    {nodeEdges.map(({ edge, other, direction }) => {
+                      const meta = edgeMeta(edge.type)
+                      return (
+                        <li key={edge.edge_id} className="flex items-center justify-between gap-2 text-xs">
+                          <span className="truncate">
+                            <span style={{ color: meta.color }}>{meta.name}</span>
+                            <span className="mx-1 text-gray-400">{direction === 'out' ? '→' : '←'}</span>
+                            {other?.label ?? other?.node_id ?? '?'}
+                            {edge.label && <span className="ml-1 text-gray-400">({edge.label})</span>}
+                          </span>
+                          <button
+                            onClick={() => removeEdge(edge.edge_id)}
+                            disabled={busy}
+                            className="shrink-0 rounded border border-gray-300 px-1.5 py-0.5 text-gray-500 hover:bg-gray-50 disabled:opacity-50"
+                          >
+                            删
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <select
+                    value={linkType}
+                    onChange={(event) => setLinkType(event.target.value)}
+                    className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-xs text-slate-800"
+                  >
+                    {EDGE_TYPES.map((type) => (
+                      <option key={type} value={type}>
+                        {edgeMeta(type).name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={linkTargetId}
+                    onChange={(event) => setLinkTargetId(event.target.value)}
+                    className="max-w-[10rem] rounded border border-gray-300 bg-white px-1.5 py-0.5 text-xs text-slate-800"
+                  >
+                    <option value="">选择目标节点…</option>
+                    {(graph?.graph.nodes ?? [])
+                      .filter((node) => node.node_id !== selected.node_id)
+                      .map((node) => (
+                        <option key={node.node_id} value={node.node_id}>
+                          {node.label}
+                        </option>
+                      ))}
+                  </select>
+                  <input
+                    value={linkLabel}
+                    onChange={(event) => setLinkLabel(event.target.value)}
+                    placeholder="标签(可空)"
+                    className="w-24 rounded border border-gray-300 bg-white px-1.5 py-0.5 text-xs text-slate-800"
+                  />
+                  <button
+                    onClick={() => {
+                      if (!linkTargetId) return
+                      createEdge(selected.node_id, linkTargetId, linkType, linkLabel)
+                      setLinkTargetId('')
+                      setLinkLabel('')
+                    }}
+                    disabled={busy || !linkTargetId}
+                    className="rounded border border-blue-300 px-2 py-0.5 text-xs text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                  >
+                    添加关系
+                  </button>
+                </div>
+              </div>
+
               {TEMPLATES[selected.type] && (
                 <div className="mt-2 border-t border-gray-100 pt-2">
                   <p className="text-xs text-gray-400">
