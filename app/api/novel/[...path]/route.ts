@@ -1,7 +1,7 @@
 // 小说图谱 API:口令保护 + 转发到 NovelService(移植自 novel-graph-agent BFF)
 // 所有请求需携带 header: x-novel-key = NOVEL_ACCESS_KEY
 import { NextRequest, NextResponse } from 'next/server'
-import { getNovelService } from '@/lib/novel/factory'
+import { describePlanner, getNovelService } from '@/lib/novel/factory'
 import type { ExportFormat, ImportFormat } from '@/lib/novel/novel-service'
 
 export const runtime = 'nodejs'
@@ -61,6 +61,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   const url = new URL(req.url)
 
   try {
+    // GET /api/novel/status —— 当前 planner 配置(不含密钥)
+    if (path.length === 1 && path[0] === 'status') {
+      return NextResponse.json({ planner: describePlanner() })
+    }
     // GET /api/novel/projects
     if (path.length === 1 && path[0] === 'projects') {
       return NextResponse.json({ projects: await service.listProjects() })
@@ -76,6 +80,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     // GET /api/novel/projects/:id/graph?branch_id=
     if (path.length === 3 && path[0] === 'projects' && path[2] === 'graph') {
       return NextResponse.json(await service.getGraph(path[1], url.searchParams.get('branch_id') ?? undefined))
+    }
+    // GET /api/novel/projects/:id/drafts?branch_id=
+    if (path.length === 3 && path[0] === 'projects' && path[2] === 'drafts') {
+      return NextResponse.json(
+        await service.listDrafts(path[1], url.searchParams.get('branch_id') ?? undefined)
+      )
     }
     // GET /api/novel/projects/:id/export?format=
     if (path.length === 3 && path[0] === 'projects' && path[2] === 'export') {
@@ -212,6 +222,17 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ path: str
         )
       )
     }
+    // PATCH /api/novel/projects/:id/drafts/:draftId  { status: 'accepted' | 'rejected' }
+    if (path.length === 4 && path[0] === 'projects' && path[2] === 'drafts') {
+      const body = await readBody(req)
+      if (body.status === 'accepted') {
+        return NextResponse.json(await service.acceptDraft(path[1], path[3]))
+      }
+      if (body.status === 'rejected') {
+        return NextResponse.json(await service.rejectDraft(path[1], path[3]))
+      }
+      return NextResponse.json({ error: { message: 'status 必须是 accepted 或 rejected' } }, { status: 400 })
+    }
     return NextResponse.json({ error: { message: `Route not found: PATCH /${path.join('/')}` } }, { status: 404 })
   } catch (error) {
     return fail(error)
@@ -228,6 +249,10 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ path: st
     // DELETE /api/novel/projects/:id/nodes/:nodeId?branch_id=
     if (path.length === 4 && path[0] === 'projects' && path[2] === 'nodes') {
       return NextResponse.json(await service.deleteNode(path[1], path[3], branchParam))
+    }
+    // DELETE /api/novel/projects/:id/drafts/:draftId
+    if (path.length === 4 && path[0] === 'projects' && path[2] === 'drafts') {
+      return NextResponse.json(await service.deleteDraft(path[1], path[3]))
     }
     return NextResponse.json({ error: { message: `Route not found: DELETE /${path.join('/')}` } }, { status: 404 })
   } catch (error) {

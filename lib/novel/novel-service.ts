@@ -333,7 +333,8 @@ function parseMarkdownProject(content: string, projectId?: string): ProjectState
       }
     ],
     nodes: [node],
-    edges: []
+    edges: [],
+    drafts: []
   };
 }
 
@@ -553,11 +554,80 @@ export class NovelService {
   async writeDraft(input: WriteDraftRequest): Promise<ToolResult> {
     const state = await this.repository.getProject(input.project_id);
     const branchId = input.branch_id ?? state.active_branch_id;
-    return this.planner.writeDraft({
+    const result = await this.planner.writeDraft({
       project: projectForBranch(state, branchId),
       branchId,
       kind: input.kind,
       prompt: input.prompt
+    });
+    // 生成即持久化,避免刷新丢失
+    if (result.draft) {
+      await this.repository.saveDraft(input.project_id, result.draft);
+    }
+    return result;
+  }
+
+  async listDrafts(projectId: string, branchId?: string): Promise<{ project_id: string; branch_id: string; drafts: Draft[] }> {
+    const state = await this.repository.getProject(projectId);
+    const targetBranch = branchId ?? state.active_branch_id;
+    return {
+      project_id: projectId,
+      branch_id: targetBranch,
+      drafts: await this.repository.listDrafts(projectId, targetBranch)
+    };
+  }
+
+  /** 采纳草稿:标记为 accepted,并把内容落成图谱节点 */
+  async acceptDraft(projectId: string, draftId: string): Promise<ToolResult> {
+    const draft = await this.repository.setDraftStatus(projectId, draftId, 'accepted');
+    const timestamp = nowIso();
+    const node: Node = {
+      node_id: stableId('node', projectId, draft.branch_id, draft.draft_id),
+      type: draft.kind === 'outline' || draft.kind === 'summary' ? 'outline' : 'scene',
+      label: draft.title,
+      content: draft.content,
+      status: 'provisional',
+      branch_scope: draft.branch_id,
+      source_refs: [{ kind: 'draft', text: draft.draft_id }],
+      tags: ['draft', draft.kind],
+      created_at: timestamp,
+      updated_at: timestamp
+    };
+    const saved = await this.repository.upsertNodesAndEdges(projectId, {
+      branchId: draft.branch_id,
+      summary: `Accept draft: ${draft.title}`,
+      createdBy: 'user',
+      nodes: [node]
+    });
+    return toolResult({
+      projectId,
+      branchId: draft.branch_id,
+      revisionId: saved.revision.revision_id,
+      summary: `已采纳草稿「${draft.title}」并写入图谱。`,
+      graphDelta: saved.revision.delta,
+      draft
+    });
+  }
+
+  async rejectDraft(projectId: string, draftId: string): Promise<ToolResult> {
+    const draft = await this.repository.setDraftStatus(projectId, draftId, 'rejected');
+    const state = await this.repository.getProject(projectId);
+    return toolResult({
+      projectId,
+      branchId: draft.branch_id,
+      revisionId: state.current_revision_id,
+      summary: `已标记草稿「${draft.title}」为弃用。`
+    });
+  }
+
+  async deleteDraft(projectId: string, draftId: string): Promise<ToolResult> {
+    const draft = await this.repository.deleteDraft(projectId, draftId);
+    const state = await this.repository.getProject(projectId);
+    return toolResult({
+      projectId,
+      branchId: draft.branch_id,
+      revisionId: state.current_revision_id,
+      summary: `已删除草稿「${draft.title}」。`
     });
   }
 

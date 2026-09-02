@@ -38,9 +38,13 @@ interface ProjectSummaryT {
 }
 
 interface DraftT {
+  draft_id?: string
   kind: string
   title: string
   content: string
+  status?: string
+  created_at?: string
+  branch_id?: string
 }
 
 interface ToolResultT {
@@ -77,6 +81,31 @@ const TYPE_META: Record<string, { name: string; color: string }> = {
 
 function typeMeta(type: string) {
   return TYPE_META[type] ?? { name: type, color: '#94a3b8' }
+}
+
+/** 右上角「放大」小按钮 */
+function ExpandButton({ onClick, label = '放大查看' }: { onClick: () => void; label?: string }) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="shrink-0 rounded border border-gray-300 bg-white p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+    >
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6">
+        <path d="M9.5 1.5h5v5M14.5 1.5 9 7M6.5 14.5h-5v-5M1.5 14.5 7 9" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
+  )
+}
+
+type ModalKind = 'intake' | 'node' | 'readonly'
+
+interface PlannerInfoT {
+  mode: 'model' | 'heuristic'
+  plan_model: string | null
+  write_model: string | null
+  base_host: string | null
 }
 
 interface LaidNode {
@@ -170,6 +199,16 @@ export default function NovelStudioPage() {
   const [planResult, setPlanResult] = useState<ToolResultT | null>(null)
   const [draftPrompt, setDraftPrompt] = useState('')
   const [draftResult, setDraftResult] = useState<DraftT | null>(null)
+  const [drafts, setDrafts] = useState<DraftT[]>([])
+  const [openDraftId, setOpenDraftId] = useState<string | null>(null)
+  const [planner, setPlanner] = useState<PlannerInfoT | null>(null)
+  const [modal, setModal] = useState<{ kind: ModalKind; title: string } | null>(null)
+  const [readonlyText, setReadonlyText] = useState('')
+
+  const openReadonlyModal = (title: string, text: string) => {
+    setReadonlyText(text)
+    setModal({ kind: 'readonly', title })
+  }
 
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
@@ -179,7 +218,18 @@ export default function NovelStudioPage() {
   const loadProjects = useCallback(async (k: string) => {
     const data = await api<{ projects: ProjectSummaryT[] }>(k, 'projects')
     setProjects(data.projects)
+    api<{ planner: PlannerInfoT }>(k, 'status')
+      .then((status) => setPlanner(status.planner))
+      .catch(() => setPlanner(null))
     return data.projects
+  }, [])
+
+  const loadDrafts = useCallback(async (k: string, pid: string, bid: string) => {
+    const data = await api<{ drafts: DraftT[] }>(
+      k,
+      `projects/${encodeURIComponent(pid)}/drafts?branch_id=${encodeURIComponent(bid)}`
+    )
+    setDrafts(data.drafts)
   }, [])
 
   const loadGraph = useCallback(
@@ -188,8 +238,9 @@ export default function NovelStudioPage() {
       const data = await api<GraphResponseT>(k, `projects/${encodeURIComponent(pid)}/graph${query}`)
       setGraph(data)
       setBranchId(data.branch_id)
+      await loadDrafts(k, pid, data.branch_id)
     },
-    []
+    [loadDrafts]
   )
 
   useEffect(() => {
@@ -210,6 +261,15 @@ export default function NovelStudioPage() {
     }, 0)
     return () => window.clearTimeout(timer)
   }, [loadProjects, loadGraph])
+
+  useEffect(() => {
+    if (!modal) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setModal(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [modal])
 
   const unlock = async () => {
     setBusy(true)
@@ -262,6 +322,8 @@ export default function NovelStudioPage() {
       setSelected(null)
       setPlanResult(null)
       setDraftResult(null)
+      setOpenDraftId(null)
+      setModal(null)
       await loadGraph(key, pid)
     })
 
@@ -314,6 +376,26 @@ export default function NovelStudioPage() {
         body: JSON.stringify({ branch_id: branchId, kind, prompt: draftPrompt || undefined })
       })
       setDraftResult(result.draft)
+      await loadDrafts(key, projectId, branchId)
+    })
+
+  const acceptDraft = (draftId: string) =>
+    run(async () => {
+      await api(key, `projects/${encodeURIComponent(projectId)}/drafts/${encodeURIComponent(draftId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'accepted' })
+      })
+      await loadGraph(key, projectId, branchId)
+    })
+
+  const removeDraft = (draftId: string, title: string) =>
+    run(async () => {
+      if (!window.confirm(`删除草稿「${title}」?`)) return
+      await api(key, `projects/${encodeURIComponent(projectId)}/drafts/${encodeURIComponent(draftId)}`, {
+        method: 'DELETE'
+      })
+      if (openDraftId === draftId) setOpenDraftId(null)
+      await loadDrafts(key, projectId, branchId)
     })
 
   const exportAs = (format: string) =>
@@ -347,6 +429,7 @@ export default function NovelStudioPage() {
         body: JSON.stringify({ label: editLabel, content: editContent, type: editType, branch_id: branchId })
       })
       setSelected(null)
+      setModal((current) => (current?.kind === 'node' ? null : current))
       await loadGraph(key, projectId, branchId)
     })
 
@@ -364,6 +447,7 @@ export default function NovelStudioPage() {
         { method: 'DELETE' }
       )
       setSelected(null)
+      setModal((current) => (current?.kind === 'node' ? null : current))
       await loadGraph(key, projectId, branchId)
     })
 
@@ -454,6 +538,24 @@ export default function NovelStudioPage() {
     <div className="relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] w-screen px-4 py-6 lg:px-8">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="mr-2 text-xl font-bold">小说工坊</h1>
+        {planner && (
+          <span
+            title={
+              planner.mode === 'model'
+                ? `规划模型 ${planner.plan_model ?? '未配置'} / 写作模型 ${planner.write_model ?? '未配置'}${planner.base_host ? ` · ${planner.base_host}` : ''}`
+                : '未配置 NOVEL_LLM_* 环境变量,建议与草稿由内置规则生成,非模型输出'
+            }
+            className={`rounded-full px-2 py-0.5 text-xs ${
+              planner.mode === 'model'
+                ? 'bg-emerald-100 text-emerald-700'
+                : 'bg-amber-100 text-amber-700'
+            }`}
+          >
+            {planner.mode === 'model'
+              ? `模型模式 · 规划 ${planner.plan_model ?? '—'} / 写作 ${planner.write_model ?? '—'}`
+              : '规则模式(未接模型)'}
+          </span>
+        )}
         <select
           value={projectId}
           onChange={(event) => switchProject(event.target.value)}
@@ -539,6 +641,40 @@ export default function NovelStudioPage() {
 
       {message && <p className="mt-2 text-sm text-red-500">{message}</p>}
       {busy && <p className="mt-2 text-sm text-gray-400">处理中…(模型生成可能需要 10-60 秒)</p>}
+
+      {/* 放大浮层:居中盖在画布上方,外层 pointer-events-none 使画布其余部分仍可操作 */}
+      {modal && (
+        <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center p-4 sm:p-8">
+          <div className="pointer-events-auto flex max-h-[82vh] w-full max-w-3xl flex-col rounded-xl border border-gray-300 bg-white text-slate-800 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-gray-100 px-4 py-2.5">
+              <h3 className="truncate text-sm font-semibold">{modal.title}</h3>
+              <button
+                onClick={() => setModal(null)}
+                className="shrink-0 rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-100"
+              >
+                还原
+              </button>
+            </div>
+            {modal.kind === 'readonly' ? (
+              <p className="flex-1 overflow-auto whitespace-pre-wrap p-4 text-sm leading-relaxed text-gray-700">
+                {readonlyText}
+              </p>
+            ) : (
+              <textarea
+                autoFocus
+                value={modal.kind === 'intake' ? intakeText : editContent}
+                onChange={(event) =>
+                  modal.kind === 'intake' ? setIntakeText(event.target.value) : setEditContent(event.target.value)
+                }
+                className="min-h-[50vh] flex-1 resize-none overflow-auto p-4 text-sm leading-relaxed text-gray-700 focus:outline-none"
+              />
+            )}
+            <p className="border-t border-gray-100 px-4 py-1.5 text-xs text-gray-400">
+              按 Esc 或点「还原」收起{modal.kind !== 'readonly' && ';编辑内容会同步回右侧面板'}
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="mt-4 flex flex-col gap-4 lg:flex-row">
         <div className="h-[calc(100vh-16rem)] min-h-[520px] flex-1 overflow-hidden rounded-xl border border-gray-200 bg-white">
@@ -706,9 +842,21 @@ export default function NovelStudioPage() {
                   </span>
                   <h2 className="text-sm font-semibold text-gray-500">节点详情</h2>
                 </div>
-                <button onClick={() => setSelected(null)} className="shrink-0 text-sm text-gray-400 hover:text-gray-600">
-                  关闭
-                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  <ExpandButton
+                    onClick={() => setModal({ kind: 'node', title: `编辑节点正文 · ${editLabel}` })}
+                    label="放大编辑"
+                  />
+                  <button
+                    onClick={() => {
+                      setSelected(null)
+                      setModal((current) => (current?.kind === 'node' ? null : current))
+                    }}
+                    className="text-sm text-gray-400 hover:text-gray-600"
+                  >
+                    关闭
+                  </button>
+                </div>
               </div>
               <input
                 value={editLabel}
@@ -760,7 +908,10 @@ export default function NovelStudioPage() {
           )}
 
           <div className="rounded-xl border border-gray-200 bg-white p-4 text-slate-800">
-            <h2 className="font-semibold">输入设定 / 剧情</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold">输入设定 / 剧情</h2>
+              <ExpandButton onClick={() => setModal({ kind: 'intake', title: '输入设定 / 剧情' })} label="放大编辑" />
+            </div>
             <textarea
               value={intakeText}
               onChange={(event) => setIntakeText(event.target.value)}
@@ -818,9 +969,74 @@ export default function NovelStudioPage() {
             </div>
             {draftResult && (
               <div className="mt-3 rounded-lg bg-emerald-50 p-3">
-                <p className="text-sm font-medium text-emerald-800">{draftResult.title}</p>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm font-medium text-emerald-800">{draftResult.title}</p>
+                  <ExpandButton onClick={() => openReadonlyModal(draftResult.title, draftResult.content)} />
+                </div>
                 <p className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap text-sm text-gray-700">{draftResult.content}</p>
+                <p className="mt-1 text-xs text-emerald-700">已自动保存到下方草稿箱</p>
               </div>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-gray-200 bg-white p-4 text-slate-800">
+            <h2 className="font-semibold">
+              草稿箱 <span className="text-xs font-normal text-gray-400">分支 {branchId} · {drafts.length} 篇</span>
+            </h2>
+            {drafts.length === 0 ? (
+              <p className="mt-2 text-sm text-gray-400">还没有草稿。生成的场景/对白会自动保存在这里。</p>
+            ) : (
+              <ul className="mt-2 divide-y divide-gray-100">
+                {drafts.map((draft) => {
+                  const id = draft.draft_id ?? ''
+                  const isOpen = openDraftId === id
+                  return (
+                    <li key={id} className="py-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <button
+                          onClick={() => setOpenDraftId(isOpen ? null : id)}
+                          className="flex-1 text-left text-sm hover:text-blue-600"
+                        >
+                          <span className="mr-1 text-xs text-gray-400">
+                            {draft.kind === 'dialogue' ? '对白' : draft.kind === 'scene' ? '场景' : draft.kind}
+                          </span>
+                          {draft.title}
+                          {draft.status === 'accepted' && <span className="ml-1 text-xs text-emerald-600">已采纳</span>}
+                          {draft.status === 'rejected' && <span className="ml-1 text-xs text-gray-400">已弃用</span>}
+                        </button>
+                        <div className="flex shrink-0 gap-1">
+                          {draft.status !== 'accepted' && (
+                            <button
+                              onClick={() => acceptDraft(id)}
+                              disabled={busy}
+                              className="rounded border border-emerald-300 px-1.5 py-0.5 text-xs text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                            >
+                              采纳
+                            </button>
+                          )}
+                          <button
+                            onClick={() => removeDraft(id, draft.title)}
+                            disabled={busy}
+                            className="rounded border border-gray-300 px-1.5 py-0.5 text-xs text-gray-500 hover:bg-gray-50 disabled:opacity-50"
+                          >
+                            删除
+                          </button>
+                        </div>
+                      </div>
+                      {isOpen && (
+                        <div className="relative mt-1">
+                          <div className="absolute right-1 top-1">
+                            <ExpandButton onClick={() => openReadonlyModal(draft.title, draft.content)} />
+                          </div>
+                          <p className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-gray-50 p-2 pr-10 text-sm text-gray-700">
+                            {draft.content}
+                          </p>
+                        </div>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
             )}
           </div>
         </div>

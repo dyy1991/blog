@@ -1,6 +1,8 @@
-@import "tailwindcss";
-
+/* 字体 @import 必须在 tailwindcss 之前:Tailwind v4 会就地展开成大量规则,
+   之后再出现 @import 会违反 CSS 规范(@import 必须先于所有规则)。 */
 @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&display=swap');
+
+@import "tailwindcss";
 
 :root {
   --bg: #080d14;

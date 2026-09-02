@@ -105,7 +105,9 @@ export const StoryGraphStateSchema = z.object({
   branches: z.array(BranchSchema),
   revisions: z.array(RevisionSchema),
   nodes: z.array(NodeSchema),
-  edges: z.array(EdgeSchema)
+  edges: z.array(EdgeSchema),
+  // 博客端扩展:持久化生成的草稿(老数据缺此字段时默认为空数组)
+  drafts: z.array(DraftSchema).default([])
 }).strict();
 
 export type NodeStatus = z.infer<typeof NodeStatusSchema>;

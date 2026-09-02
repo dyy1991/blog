@@ -92,6 +92,48 @@ function buildPlanner(): PlannerAdapter {
   });
 }
 
+export interface PlannerInfo {
+  mode: 'model' | 'heuristic';
+  plan_model: string | null;
+  write_model: string | null;
+  endpoint: string | null;
+  base_host: string | null;
+}
+
+/** 供界面展示当前生效的 planner 配置(不含密钥) */
+export function describePlanner(): PlannerInfo {
+  const base = readClientEnv('');
+  const planOverride = readClientEnv('PLAN');
+  const writeOverride = readClientEnv('WRITE');
+
+  const resolve = (override: ClientEnvConfig) => {
+    const baseUrl = override.baseUrl ?? base.baseUrl;
+    const apiKey = override.apiKey ?? base.apiKey;
+    const model = override.model ?? base.model;
+    return baseUrl && apiKey && model ? model : null;
+  };
+
+  const planModel = resolve(planOverride);
+  const writeModel = resolve(writeOverride);
+  const baseUrl = base.baseUrl ?? planOverride.baseUrl ?? writeOverride.baseUrl;
+  let host: string | null = null;
+  if (baseUrl) {
+    try {
+      host = new URL(baseUrl).host;
+    } catch {
+      host = baseUrl;
+    }
+  }
+
+  return {
+    mode: planModel || writeModel ? 'model' : 'heuristic',
+    plan_model: planModel,
+    write_model: writeModel,
+    endpoint: planModel || writeModel ? toEndpoint(base.endpoint) : null,
+    base_host: host
+  };
+}
+
 interface NovelRuntime {
   repository: ProjectRepository;
   service: NovelService;

@@ -300,6 +300,7 @@ export function importOpml(text: string): ProjectState {
     branches: normalizedBranches,
     revisions: [importedRevision],
     nodes,
-    edges: []
+    edges: [],
+    drafts: []
   });
 }
