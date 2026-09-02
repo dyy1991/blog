@@ -53,6 +53,13 @@ async function readBody(req: NextRequest): Promise<Body> {
 
 function fail(error: unknown): NextResponse {
   const message = error instanceof Error ? error.message : 'Unknown error'
+  // 顺序链冲突:交给前端询问是否替换
+  if (message.startsWith('NEXT_CONFLICT:')) {
+    return NextResponse.json(
+      { error: { code: 'NEXT_CONFLICT', message: message.slice('NEXT_CONFLICT:'.length) } },
+      { status: 409 }
+    )
+  }
   const status = /not found|已存在|already exists/i.test(message) ? 404 : 500
   return NextResponse.json({ error: { message } }, { status: message.includes('already exists') ? 409 : status })
 }
@@ -213,7 +220,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
               from_node_id: asString(body.from_node_id),
               to_node_id: asString(body.to_node_id),
               type,
-              label: asOptionalString(body.label)
+              label: asOptionalString(body.label),
+              replace_existing: body.replace_existing === true
             },
             asOptionalString(body.branch_id)
           ),

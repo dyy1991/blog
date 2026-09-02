@@ -67,17 +67,22 @@ interface GraphResponseT {
   }
 }
 
-const TYPE_META: Record<string, { name: string; color: string }> = {
+const TYPE_META: Record<string, { name: string; color: string; deprecated?: boolean }> = {
   worldbuilding: { name: '世界观', color: '#0ea5e9' },
   character: { name: '角色', color: '#f59e0b' },
-  relationship: { name: '关系', color: '#ec4899' },
+  faction: { name: '势力/组织', color: '#7c3aed' },
   plot: { name: '主线剧情', color: '#ef4444' },
   chapter: { name: '章节', color: '#8b5cf6' },
   scene: { name: '场景', color: '#10b981' },
   branch_note: { name: '分支设定', color: '#6366f1' },
   outline: { name: '大纲', color: '#14b8a6' },
-  intake: { name: '素材', color: '#64748b' }
+  intake: { name: '素材', color: '#64748b' },
+  // 旧数据兼容:节点类型「关系」与关系连线职能重叠,不再作为新建选项
+  relationship: { name: '关系(旧)', color: '#ec4899', deprecated: true }
 }
+
+/** 可供选择的节点类型(排除已弃用的) */
+const SELECTABLE_TYPES = Object.entries(TYPE_META).filter(([, meta]) => !meta.deprecated)
 
 function typeMeta(type: string) {
   return TYPE_META[type] ?? { name: type, color: '#94a3b8' }
@@ -120,7 +125,13 @@ const TEMPLATES: Record<string, Array<{ label: string; type: string }>> = {
     { label: '背景故事', type: 'worldbuilding' },
     { label: '性格', type: 'character' },
     { label: '动机', type: 'plot' },
-    { label: '人物关系', type: 'relationship' }
+    { label: '所属势力', type: 'faction' }
+  ],
+  faction: [
+    { label: '首领', type: 'character' },
+    { label: '核心成员', type: 'character' },
+    { label: '目标', type: 'plot' },
+    { label: '据点', type: 'worldbuilding' }
   ],
   chapter: [
     { label: '场景', type: 'scene' },
@@ -137,7 +148,7 @@ const TEMPLATES: Record<string, Array<{ label: string; type: string }>> = {
     { label: '地理', type: 'worldbuilding' },
     { label: '历史', type: 'worldbuilding' },
     { label: '规则体系', type: 'worldbuilding' },
-    { label: '势力', type: 'relationship' }
+    { label: '势力', type: 'faction' }
   ],
   scene: [
     { label: '出场人物', type: 'character' },
@@ -708,10 +719,27 @@ export default function NovelStudioPage() {
 
   const createEdge = (fromId: string, toId: string, type: string, label?: string) =>
     run(async () => {
-      await api(key, `projects/${encodeURIComponent(projectId)}/edges`, {
-        method: 'POST',
-        body: JSON.stringify({ from_node_id: fromId, to_node_id: toId, type, label, branch_id: branchId })
-      })
+      const post = (replace: boolean) =>
+        api(key, `projects/${encodeURIComponent(projectId)}/edges`, {
+          method: 'POST',
+          body: JSON.stringify({
+            from_node_id: fromId,
+            to_node_id: toId,
+            type,
+            label,
+            branch_id: branchId,
+            replace_existing: replace
+          })
+        })
+      try {
+        await post(false)
+      } catch (error) {
+        // 顺序链是线性的:命中冲突时询问是否替换原连接,而不是静默丢弃
+        const detail = error instanceof Error ? error.message : ''
+        if (!detail.includes('顺序链是线性的')) throw error
+        if (!window.confirm(`${detail}\n\n点「确定」替换,点「取消」保留原有顺序。`)) return
+        await post(true)
+      }
       await loadGraph(key, projectId, branchId)
     })
 
@@ -1175,7 +1203,7 @@ export default function NovelStudioPage() {
                 <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
                   {timeline.chains.map((chain, row) => (
                     <text key={`row-${row}`} x={12} y={40 + row * (NODE_H + 56) - 8} fontSize={11} fill="#94a3b8">
-                      线 {row + 1} · {chain.length} 节
+                      线 {row + 1} · {chain.length} 节 · 起点「{chain[0].label}」
                     </text>
                   ))}
                   {timeline.laid.map((item, index) => {
@@ -1610,7 +1638,7 @@ export default function NovelStudioPage() {
                 onChange={(event) => setEditType(event.target.value)}
                 className="mt-2 w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-slate-800"
               >
-                {Object.entries(TYPE_META).map(([value, meta]) => (
+                {SELECTABLE_TYPES.map(([value, meta]) => (
                   <option key={value} value={value}>
                     {meta.name}
                   </option>

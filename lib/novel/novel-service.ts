@@ -171,8 +171,9 @@ function inferNodeType(text: string): string {
   if (/角色|人物|主角|配角|character|protagonist|hero|villain/i.test(text)) {
     return 'character';
   }
-  if (/人物关系|关系网|盟友|敌人|relationship|relation|ally|enemy/i.test(text)) {
-    return 'relationship';
+  // 势力/组织(排在角色之后:明确提到人物的文本仍归为角色)
+  if (/势力|组织|阵营|门派|家族|公会|教会|军团|商会|faction|organization|guild|clan/i.test(text)) {
+    return 'faction';
   }
   if (/主线|剧情|冲突|目标|plot|conflict|goal|arc/i.test(text)) {
     return 'plot';
@@ -778,7 +779,13 @@ export class NovelService {
   /** 创建关系边:next(顺序)/ relation(关系)/ conflict(冲突)/ reference(引用) */
   async createEdge(
     projectId: string,
-    input: { from_node_id: string; to_node_id: string; type: string; label?: string },
+    input: {
+      from_node_id: string;
+      to_node_id: string;
+      type: string;
+      label?: string;
+      replace_existing?: boolean;
+    },
     branchId?: string
   ): Promise<ToolResult> {
     const state = await this.repository.getProject(projectId);
@@ -789,7 +796,8 @@ export class NovelService {
       branchId: saved.revision.branch_id,
       revisionId: saved.revision.revision_id,
       summary: saved.revision.summary,
-      graphDelta: saved.revision.delta
+      graphDelta: saved.revision.delta,
+      warnings: saved.replaced.length > 0 ? [`已替换 ${saved.replaced.length} 条原有顺序连接。`] : []
     });
   }
 
