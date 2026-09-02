@@ -144,6 +144,11 @@ declare global {
 }
 
 export function getNovelService(): NovelService {
+  // instanceof 校验:开发环境 HMR 重载后类标识会变,旧实例(缺少新方法)会被丢弃重建。
+  // 生产环境模块只加载一次,该判断恒为真,单例与文件锁得以保留。
+  if (globalThis.__novelRuntime && !(globalThis.__novelRuntime.service instanceof NovelService)) {
+    globalThis.__novelRuntime = undefined;
+  }
   if (!globalThis.__novelRuntime) {
     const dataDir = path.resolve(process.env.NOVEL_DATA_DIR ?? path.join(process.cwd(), 'data', 'novel'));
     const repository = new ProjectRepository({ dataDir });

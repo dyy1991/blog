@@ -1058,17 +1058,30 @@ export default function NovelStudioPage() {
                 )}
                 {/* 根节点(项目标题) */}
                 <g
-                  onClick={() => promptAddChild(null)}
-                  className="cursor-pointer"
                   onPointerEnter={() => setHoverNodeId('__root__')}
-                  onPointerLeave={() => setHoverNodeId(null)}
+                  onPointerLeave={() => setHoverNodeId((current) => (current === '__root__' ? null : current))}
                 >
+                  {/* 透明命中区,连通根节点与右侧「+」 */}
+                  <rect
+                    x={ROOT_X - 4}
+                    y={layout.rootY - 6}
+                    width={ROOT_W + 34}
+                    height={NODE_H + 12}
+                    fill="transparent"
+                  />
                   <rect x={ROOT_X} y={layout.rootY} width={ROOT_W} height={NODE_H} rx={12} fill="#1e293b" />
-                  <text x={ROOT_X + ROOT_W / 2} y={layout.rootY + NODE_H / 2 + 4} textAnchor="middle" fontSize={13} fill="#fff">
+                  <text
+                    x={ROOT_X + ROOT_W / 2}
+                    y={layout.rootY + NODE_H / 2 + 4}
+                    textAnchor="middle"
+                    fontSize={13}
+                    fill="#fff"
+                    pointerEvents="none"
+                  >
                     {layout.title.length > 10 ? `${layout.title.slice(0, 10)}…` : layout.title}
                   </text>
-                  {hoverNodeId === '__root__' && (
-                    <>
+                  {hoverNodeId === '__root__' && !dragState && (
+                    <g className="cursor-pointer" onClick={() => promptAddChild(null)}>
                       <circle cx={ROOT_X + ROOT_W + 12} cy={layout.rootY + NODE_H / 2} r={9} fill="#2563eb" />
                       <text
                         x={ROOT_X + ROOT_W + 12}
@@ -1076,10 +1089,11 @@ export default function NovelStudioPage() {
                         textAnchor="middle"
                         fontSize={13}
                         fill="#fff"
+                        pointerEvents="none"
                       >
                         +
                       </text>
-                    </>
+                    </g>
                   )}
                 </g>
                 {/* 内容节点 */}
@@ -1098,6 +1112,14 @@ export default function NovelStudioPage() {
                       onPointerEnter={() => setHoverNodeId(nodeId)}
                       onPointerLeave={() => setHoverNodeId((current) => (current === nodeId ? null : current))}
                     >
+                      {/* 透明命中区:把节点与右侧「+」连成一片,避免鼠标经过空隙时 hover 中断 */}
+                      <rect
+                        x={laid.x - 4}
+                        y={laid.y - 6}
+                        width={NODE_W + 44}
+                        height={NODE_H + 12}
+                        fill="transparent"
+                      />
                       <rect
                         x={laid.x}
                         y={laid.y}
