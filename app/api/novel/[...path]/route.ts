@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { describePlanner, getNovelService } from '@/lib/novel/factory'
 import type { ExportFormat, ImportFormat } from '@/lib/novel/novel-service'
+import type { ReviewKind } from '@/lib/novel/review'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -12,6 +13,9 @@ type Body = Record<string, unknown>
 
 /** 可手动创建的关系类型(contains 由层级操作维护,不在此列) */
 const EDGE_TYPES = ['next', 'relation', 'conflict', 'reference']
+
+/** 一致性检查类型 */
+const REVIEW_KINDS = ['worldbuilding', 'loose_ends', 'character', 'timeline', 'custom']
 
 function unauthorized(): NextResponse {
   return NextResponse.json({ error: { message: '口令错误或未提供 (x-novel-key)' } }, { status: 401 })
@@ -222,6 +226,28 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
           { status: 201 }
         )
       }
+      // POST /api/novel/projects/:id/review  { kind, question?, branch_id?, compare_branch_id? }
+      if (path[2] === 'review') {
+        const kind = asString(body.kind, 'custom')
+        if (!REVIEW_KINDS.includes(kind)) {
+          return NextResponse.json(
+            { error: { message: `检查类型必须是 ${REVIEW_KINDS.join(' / ')} 之一` } },
+            { status: 400 }
+          )
+        }
+        if (kind === 'custom' && !asString(body.question).trim()) {
+          return NextResponse.json({ error: { message: '自由提问需要填写问题' } }, { status: 400 })
+        }
+        return NextResponse.json(
+          await service.review({
+            project_id: projectId,
+            kind: kind as ReviewKind,
+            question: asOptionalString(body.question),
+            branch_id: asOptionalString(body.branch_id),
+            compare_branch_id: asOptionalString(body.compare_branch_id)
+          })
+        )
+      }
       // POST /api/novel/projects/:id/classify  { assignments: [{node_id, type}], branch_id? }
       if (path[2] === 'classify') {
         const raw = Array.isArray(body.assignments) ? body.assignments : []
@@ -363,6 +389,10 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ path: st
   const branchParam = params.get('branch_id') ?? undefined
 
   try {
+    // DELETE /api/novel/projects/:id —— 删除整个项目(不可恢复)
+    if (path.length === 2 && path[0] === 'projects') {
+      return NextResponse.json(await service.deleteProject(path[1]))
+    }
     // DELETE /api/novel/projects/:id/nodes/:nodeId?branch_id=&cascade=true
     if (path.length === 4 && path[0] === 'projects' && path[2] === 'nodes') {
       return NextResponse.json(

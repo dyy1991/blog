@@ -24,12 +24,14 @@ import {
   ToolResultSchema,
   type Branch,
   type Draft,
+  type Edge,
   type GraphDelta,
   type Node,
   type ProjectState,
   type ToolResult
 } from './story-types';
 import { exportManuscript } from './manuscript';
+import { runReview, type ReviewKind, type ReviewResult } from './review';
 import { HeuristicPlannerAdapter } from './heuristic-planner-adapter';
 import type { LanguageModelClient, PlannerAdapter, PlannerDraftRequest } from './planner-types';
 
@@ -921,6 +923,69 @@ export class NovelService {
       .filter((item) => item.suggested_type !== item.current_type);
 
     return { project_id: projectId, branch_id: targetBranch, source, suggestions };
+  }
+
+  /** AI 一致性检查:预设检查项或自由提问,可选与另一分支对比 */
+  async review(input: {
+    project_id: string;
+    kind: ReviewKind;
+    question?: string;
+    branch_id?: string;
+    compare_branch_id?: string;
+  }): Promise<ReviewResult> {
+    const client = this.classifier;
+    if (!client) {
+      throw new Error('一致性检查需要配置模型(NOVEL_LLM_* 环境变量),当前为规则模式。');
+    }
+    const state = await this.repository.getProject(input.project_id);
+    const branchId = input.branch_id ?? state.active_branch_id;
+    const { nodes } = resolveNodesForBranch(state, branchId);
+    const nodeIds = new Set(nodes.map((node) => node.node_id));
+    const edges = resolveEdgesForBranch(state, branchId).filter(
+      (edge) => nodeIds.has(edge.from_node_id) && nodeIds.has(edge.to_node_id)
+    );
+
+    let compareNodes: Node[] | undefined;
+    let compareEdges: Edge[] | undefined;
+    if (input.compare_branch_id && input.compare_branch_id !== branchId) {
+      const resolved = resolveNodesForBranch(state, input.compare_branch_id);
+      compareNodes = resolved.nodes;
+      const compareIds = new Set(compareNodes.map((node) => node.node_id));
+      compareEdges = resolveEdgesForBranch(state, input.compare_branch_id).filter(
+        (edge) => compareIds.has(edge.from_node_id) && compareIds.has(edge.to_node_id)
+      );
+    }
+
+    if (nodes.length === 0) {
+      return {
+        kind: input.kind,
+        branch_id: branchId,
+        compare_branch_id: input.compare_branch_id,
+        summary: '当前分支还没有节点,无法检查。',
+        findings: [],
+        warnings: []
+      };
+    }
+
+    return runReview({
+      client,
+      kind: input.kind,
+      question: input.question,
+      branchId,
+      compareBranchId: compareNodes ? input.compare_branch_id : undefined,
+      title: state.title,
+      premise: state.premise,
+      nodes,
+      edges,
+      compareNodes,
+      compareEdges
+    });
+  }
+
+  /** 删除项目及其全部数据(不可恢复) */
+  async deleteProject(projectId: string): Promise<{ project_id: string; status: 'ok'; summary: string }> {
+    await this.repository.deleteProject(projectId);
+    return { project_id: projectId, status: 'ok', summary: `已删除项目 ${projectId}。` };
   }
 
   /** 批量写入分类结果(经用户确认) */

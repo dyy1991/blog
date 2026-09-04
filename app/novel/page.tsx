@@ -127,6 +127,34 @@ const EDGE_META: Record<string, { name: string; color: string; dashed: boolean }
 }
 const EDGE_TYPES = ['next', 'relation', 'conflict', 'reference'] as const
 
+const EXPORT_OPTIONS: Array<{ label: string; format: string; extra?: string; hint: string }> = [
+  { label: '成稿(全文)', format: 'manuscript', hint: '已采纳草稿优先,缺正文处用大纲填充' },
+  {
+    label: '成稿(仅已写正文)',
+    format: 'manuscript',
+    extra: '&drafts_only=true',
+    hint: '跳过还没写的小节'
+  },
+  { label: '大纲 Markdown', format: 'markdown', hint: '分支与节点的层级清单' },
+  { label: '思维导图 Mermaid', format: 'mermaid', hint: '可粘贴到 Mermaid 编辑器' },
+  { label: 'OPML', format: 'opml', hint: '导入到常见思维导图软件' },
+  { label: '完整 JSON', format: 'json', hint: '含全部数据,可用于备份与迁移' }
+]
+
+/** 一致性检查预设 */
+const REVIEW_PRESETS: Array<{ kind: string; name: string; hint: string }> = [
+  { kind: 'worldbuilding', name: '世界观一致性', hint: '新内容是否与已有设定/规则矛盾' },
+  { kind: 'loose_ends', name: '未闭合伏笔', hint: '挖了没填的坑、断掉的剧情链' },
+  { kind: 'character', name: '角色行为一致性', hint: '行为是否符合性格与动机' },
+  { kind: 'timeline', name: '时间线与因果', hint: '先后顺序、因果是否自洽' }
+]
+
+const SEVERITY_META: Record<string, { name: string; color: string; bg: string }> = {
+  high: { name: '严重', color: '#b91c1c', bg: '#fef2f2' },
+  medium: { name: '中等', color: '#b45309', bg: '#fffbeb' },
+  low: { name: '轻微', color: '#0369a1', bg: '#f0f9ff' }
+}
+
 function edgeMeta(type: string) {
   return EDGE_META[type] ?? { name: type, color: '#94a3b8', dashed: true }
 }
@@ -172,6 +200,22 @@ const TEMPLATES: Record<string, Array<{ label: string; type: string }>> = {
 /** 新建子节点时的默认类型:沿用父节点类型,让手动搭建的结构保持连贯 */
 function childTypeFor(parentType: string): string {
   return parentType || 'intake'
+}
+
+interface ReviewFindingT {
+  severity: string
+  title: string
+  detail: string
+  node_ids: string[]
+  suggestion: string
+}
+
+interface ReviewResultT {
+  kind: string
+  branch_id: string
+  compare_branch_id?: string
+  summary: string
+  findings: ReviewFindingT[]
 }
 
 interface PlannerInfoT {
@@ -407,6 +451,10 @@ export default function NovelStudioPage() {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [linkState, setLinkState] = useState<{ fromId: string; x: number; y: number; overId: string | null } | null>(null)
   const [viewMode, setViewMode] = useState<'mindmap' | 'timeline'>('mindmap')
+  const [exportOpen, setExportOpen] = useState(false)
+  const [reviewResult, setReviewResult] = useState<ReviewResultT | null>(null)
+  const [reviewQuestion, setReviewQuestion] = useState('')
+  const [compareBranchId, setCompareBranchId] = useState('')
   const [search, setSearch] = useState('')
   const [filterType, setFilterType] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
@@ -741,6 +789,61 @@ export default function NovelStudioPage() {
       await loadGraph(key, projectId, branchId)
     })
 
+  const runReview = (kind: string) =>
+    run(async () => {
+      if (kind === 'custom' && !reviewQuestion.trim()) return
+      setReviewResult(null)
+      const result = await api<ReviewResultT>(key, `projects/${encodeURIComponent(projectId)}/review`, {
+        method: 'POST',
+        body: JSON.stringify({
+          kind,
+          question: kind === 'custom' ? reviewQuestion.trim() : undefined,
+          branch_id: branchId,
+          compare_branch_id: compareBranchId || undefined
+        })
+      })
+      setReviewResult(result)
+    })
+
+  /** 点问题里的节点名:选中并把它滚到视野中央 */
+  const focusNode = (nodeId: string) => {
+    const node = graph?.graph.nodes.find((item) => item.node_id === nodeId)
+    if (!node) return
+    selectNode(node)
+    const laid = nodePositions.get(nodeId)
+    const rect = svgRef.current?.getBoundingClientRect()
+    if (laid && rect) {
+      setPan({
+        x: rect.width / 2 - (laid.x + NODE_W / 2) * zoom,
+        y: rect.height / 2 - (laid.y + NODE_H / 2) * zoom
+      })
+    }
+  }
+
+  const deleteProject = () =>
+    run(async () => {
+      const project = projects.find((item) => item.project_id === projectId)
+      const typed = window.prompt(
+        `删除项目「${project?.title ?? projectId}」将永久移除它的全部节点、分支和草稿,不可恢复。\n\n` +
+          `确认请输入项目 ID:${projectId}`
+      )
+      if (typed !== projectId) {
+        if (typed !== null) setMessage('输入的项目 ID 不匹配,已取消删除')
+        return
+      }
+      await api(key, `projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' })
+      const list = await loadProjects(key)
+      setSelected(null)
+      setReviewResult(null)
+      setGraph(null)
+      if (list.length > 0) {
+        setProjectId(list[0].project_id)
+        await loadGraph(key, list[0].project_id)
+      } else {
+        setProjectId('')
+      }
+    })
+
   const classifyNodes = () =>
     run(async () => {
       const data = await api<{
@@ -1041,6 +1144,7 @@ export default function NovelStudioPage() {
   const onPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
     if (dragState || linkState) return
     setSelectedEdgeId(null)
+    setExportOpen(false)
     dragRef.current = { startX: event.clientX, startY: event.clientY, baseX: pan.x, baseY: pan.y }
   }
 
@@ -1160,6 +1264,16 @@ export default function NovelStudioPage() {
         >
           导入 JSON
         </button>
+        {projectId && (
+          <button
+            onClick={deleteProject}
+            disabled={busy}
+            title="永久删除当前项目及其全部数据"
+            className="rounded-md border border-red-300 bg-white px-2 py-1 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+          >
+            删除项目
+          </button>
+        )}
         <input
           ref={fileRef}
           type="file"
@@ -1248,23 +1362,32 @@ export default function NovelStudioPage() {
               >
                 智能分类
               </button>
-              <button
-                onClick={() => exportAs('manuscript')}
-                disabled={busy}
-                title="按章节顺序拼接成稿:已采纳草稿优先,无正文时用节点大纲"
-                className="rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
-              >
-                导出成稿
-              </button>
-              {(['markdown', 'mermaid', 'opml', 'json'] as const).map((format) => (
+              <div className="relative">
                 <button
-                  key={format}
-                  onClick={() => exportAs(format)}
-                  className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-100"
+                  onClick={() => setExportOpen((open) => !open)}
+                  disabled={busy}
+                  className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-gray-100 disabled:opacity-50"
                 >
-                  导出 {format}
+                  导出 ▾
                 </button>
-              ))}
+                {exportOpen && (
+                  <div className="absolute right-0 z-30 mt-1 w-52 overflow-hidden rounded-md border border-gray-300 bg-white shadow-lg">
+                    {EXPORT_OPTIONS.map((option) => (
+                      <button
+                        key={option.format + option.label}
+                        onClick={() => {
+                          setExportOpen(false)
+                          exportAs(option.format, option.extra)
+                        }}
+                        className="block w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-gray-50"
+                      >
+                        <span className="font-medium">{option.label}</span>
+                        <span className="block text-[11px] text-gray-400">{option.hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </>
         )}
@@ -2069,6 +2192,120 @@ export default function NovelStudioPage() {
               )}
             </div>
           )}
+
+          {/* AI 一致性检查 */}
+          <div className="rounded-xl border border-gray-200 bg-white p-4 text-slate-800">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold">一致性检查</h2>
+              {planner?.mode !== 'model' && <span className="text-xs text-amber-600">需配置模型</span>}
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-1.5">
+              {REVIEW_PRESETS.map((preset) => (
+                <button
+                  key={preset.kind}
+                  onClick={() => runReview(preset.kind)}
+                  disabled={busy || !projectId}
+                  title={preset.hint}
+                  className="rounded border border-gray-300 px-2 py-1 text-xs text-slate-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {preset.name}
+                </button>
+              ))}
+            </div>
+            {(graph?.graph.branches.length ?? 0) > 1 && (
+              <div className="mt-2 flex items-center gap-1.5">
+                <span className="shrink-0 text-xs text-gray-400">对比分支</span>
+                <select
+                  value={compareBranchId}
+                  onChange={(event) => setCompareBranchId(event.target.value)}
+                  className="min-w-0 flex-1 rounded border border-gray-300 bg-white px-1.5 py-0.5 text-xs text-slate-800"
+                >
+                  <option value="">不对比</option>
+                  {(graph?.graph.branches ?? [])
+                    .filter((branch) => branch.branch_id !== branchId)
+                    .map((branch) => (
+                      <option key={branch.branch_id} value={branch.branch_id}>
+                        {branch.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
+            <div className="mt-2 flex gap-1.5">
+              <input
+                value={reviewQuestion}
+                onChange={(event) => setReviewQuestion(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') runReview('custom')
+                }}
+                placeholder="自由提问,如:第三章会不会跟设定冲突?"
+                className="min-w-0 flex-1 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-slate-800 focus:border-blue-500 focus:outline-none"
+              />
+              <button
+                onClick={() => runReview('custom')}
+                disabled={busy || !reviewQuestion.trim()}
+                className="shrink-0 rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                提问
+              </button>
+            </div>
+
+            {reviewResult && (
+              <div className="mt-3 border-t border-gray-100 pt-2">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm text-gray-700">{reviewResult.summary}</p>
+                  <button
+                    onClick={() => setReviewResult(null)}
+                    className="shrink-0 text-xs text-gray-400 hover:text-gray-600"
+                  >
+                    关闭
+                  </button>
+                </div>
+                {reviewResult.compare_branch_id && (
+                  <p className="mt-1 text-xs text-gray-400">对比分支:{reviewResult.compare_branch_id}</p>
+                )}
+                <ul className="mt-2 space-y-2">
+                  {reviewResult.findings.map((finding, index) => {
+                    const meta = SEVERITY_META[finding.severity] ?? SEVERITY_META.medium
+                    return (
+                      <li
+                        key={`${finding.title}-${index}`}
+                        className="rounded-lg p-2"
+                        style={{ backgroundColor: meta.bg }}
+                      >
+                        <p className="text-sm font-medium" style={{ color: meta.color }}>
+                          [{meta.name}] {finding.title}
+                        </p>
+                        {finding.detail && (
+                          <p className="mt-1 whitespace-pre-wrap text-xs text-gray-700">{finding.detail}</p>
+                        )}
+                        {finding.suggestion && (
+                          <p className="mt-1 text-xs text-gray-500">建议:{finding.suggestion}</p>
+                        )}
+                        {finding.node_ids.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {finding.node_ids.map((nodeId) => {
+                              const node = graph?.graph.nodes.find((item) => item.node_id === nodeId)
+                              if (!node) return null
+                              return (
+                                <button
+                                  key={nodeId}
+                                  onClick={() => focusNode(nodeId)}
+                                  className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[11px] text-slate-700 hover:bg-gray-100"
+                                >
+                                  {node.label}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            )}
+          </div>
 
           <div className="rounded-xl border border-gray-200 bg-white p-4 text-slate-800">
             <div className="flex items-center justify-between">
