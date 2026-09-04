@@ -393,6 +393,10 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ path: st
     if (path.length === 2 && path[0] === 'projects') {
       return NextResponse.json(await service.deleteProject(path[1]))
     }
+    // DELETE /api/novel/projects/:id/branches/:branchId
+    if (path.length === 4 && path[0] === 'projects' && path[2] === 'branches') {
+      return NextResponse.json(await service.deleteBranch(path[1], path[3]))
+    }
     // DELETE /api/novel/projects/:id/nodes/:nodeId?branch_id=&cascade=true
     if (path.length === 4 && path[0] === 'projects' && path[2] === 'nodes') {
       return NextResponse.json(

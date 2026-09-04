@@ -72,13 +72,15 @@ const TYPE_META: Record<string, { name: string; color: string; deprecated?: bool
   character: { name: '角色', color: '#f59e0b' },
   faction: { name: '势力/组织', color: '#7c3aed' },
   plot: { name: '主线剧情', color: '#ef4444' },
+  subplot: { name: '支线', color: '#6366f1' },
   chapter: { name: '章节', color: '#8b5cf6' },
   scene: { name: '场景', color: '#10b981' },
-  branch_note: { name: '分支设定', color: '#6366f1' },
   outline: { name: '大纲', color: '#14b8a6' },
   intake: { name: '素材', color: '#64748b' },
-  // 旧数据兼容:节点类型「关系」与关系连线职能重叠,不再作为新建选项
-  relationship: { name: '关系(旧)', color: '#ec4899', deprecated: true }
+  // 旧数据兼容:以下两个类型不再作为新建选项
+  // relationship 与关系连线职能重叠;branch_note 与「分支」功能名字撞车且无实际关联,已由 subplot 取代
+  relationship: { name: '关系(旧)', color: '#ec4899', deprecated: true },
+  branch_note: { name: '分支设定(旧)', color: '#818cf8', deprecated: true }
 }
 
 /** 可供选择的节点类型(排除已弃用的) */
@@ -183,6 +185,13 @@ const TEMPLATES: Record<string, Array<{ label: string; type: string }>> = {
     { label: '发展', type: 'plot' },
     { label: '高潮', type: 'plot' },
     { label: '结局', type: 'plot' }
+  ],
+  subplot: [
+    { label: '主角(配角)', type: 'character' },
+    { label: '起因', type: 'subplot' },
+    { label: '发展', type: 'subplot' },
+    { label: '结局', type: 'subplot' },
+    { label: '与主线的交汇', type: 'plot' }
   ],
   worldbuilding: [
     { label: '地理', type: 'worldbuilding' },
@@ -364,7 +373,10 @@ function layoutTree(title: string, roots: TreeNode[], collapsed: Set<string>, pa
   return { laid, rootY, width: maxX + 60, height, title, topLevelIds: roots.map((root) => root.node.node_id) }
 }
 
-/** 时间线布局:把每条 next 链横向平铺成一行 */
+/**
+ * 时间线布局:把每条 next 链横向平铺成一行。
+ * 每行按其所属的主线/支线节点命名——这正是「主线与支线并行」的呈现方式。
+ */
 function layoutTimeline(nodes: NodeT[], edges: EdgeT[]) {
   const byId = new Map(nodes.map((node) => [node.node_id, node]))
   const nextOf = new Map<string, string>()
@@ -392,8 +404,34 @@ function layoutTimeline(nodes: NodeT[], edges: EdgeT[]) {
     chains.push(chain)
   }
 
+  // 每条链归属哪条叙事线:沿 contains 边上溯,找最近的 主线/支线 祖先
+  const parentOf = new Map<string, string>()
+  for (const edge of edges) {
+    if (edge.type !== 'contains') continue
+    if (!byId.has(edge.from_node_id) || !byId.has(edge.to_node_id)) continue
+    if (parentOf.has(edge.to_node_id)) continue
+    parentOf.set(edge.to_node_id, edge.from_node_id)
+  }
+  const storylineOf = (nodeId: string): { name: string; kind: 'main' | 'sub' | 'none' } => {
+    let cursor: string | undefined = nodeId
+    const guard = new Set<string>()
+    while (cursor && !guard.has(cursor)) {
+      guard.add(cursor)
+      const node = byId.get(cursor)
+      if (node?.type === 'subplot') return { name: node.label, kind: 'sub' }
+      if (node?.type === 'plot') return { name: node.label, kind: 'main' }
+      cursor = parentOf.get(cursor)
+    }
+    return { name: '', kind: 'none' }
+  }
+
   const laid: Array<{ node: NodeT; x: number; y: number; row: number; index: number }> = []
   const rowGap = NODE_H + 56
+  const rowLabels = chains.map((chain) => {
+    const line = storylineOf(chain[0].node_id)
+    if (line.kind === 'none') return { name: chain[0].label, kind: 'none' as const }
+    return line
+  })
   chains.forEach((chain, row) => {
     chain.forEach((node, index) => {
       laid.push({ node, x: 40 + index * (NODE_W + 56), y: 40 + row * rowGap, row, index })
@@ -402,7 +440,7 @@ function layoutTimeline(nodes: NodeT[], edges: EdgeT[]) {
 
   const width = Math.max(...laid.map((item) => item.x + NODE_W), 400) + 60
   const height = Math.max(chains.length * rowGap + 80, 320)
-  return { laid, chains, width, height }
+  return { laid, chains, rowLabels, width, height }
 }
 
 async function api<T>(key: string, path: string, init?: RequestInit): Promise<T> {
@@ -642,6 +680,29 @@ export default function NovelStudioPage() {
         method: 'PATCH'
       })
       await loadGraph(key, projectId, bid)
+    })
+
+  const deleteBranch = () =>
+    run(async () => {
+      const branch = graph?.graph.branches.find((item) => item.branch_id === branchId)
+      if (!branch) return
+      const typed = window.prompt(
+        `删除分支「${branch.name}」会清除该分支独有的节点、关系和草稿(从父分支继承的内容不受影响),不可恢复。\n\n` +
+          `确认请输入分支 ID:${branchId}`
+      )
+      if (typed !== branchId) {
+        if (typed !== null) setMessage('输入的分支 ID 不匹配,已取消删除')
+        return
+      }
+      const result = await api<ToolResultT & { branch_id: string }>(
+        key,
+        `projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}`,
+        { method: 'DELETE' }
+      )
+      setSelected(null)
+      setReviewResult(null)
+      setMessage(result.summary)
+      await loadGraph(key, projectId, result.branch_id)
     })
 
   const createBranch = () =>
@@ -1287,7 +1348,12 @@ export default function NovelStudioPage() {
         />
         {graph && (
           <>
-            <span className="ml-2 text-sm text-gray-400">分支</span>
+            <span
+              className="ml-2 cursor-help text-sm text-gray-400"
+              title="分支 = 同一个故事的另一个版本(what-if 推演),一次只看到一个,互斥。想写与主线并行的配角故事线,请用「支线」类型的节点,它们共存于同一分支并会一起进入成稿。"
+            >
+              分支 ⓘ
+            </span>
             <select
               value={branchId}
               onChange={(event) => switchBranch(event.target.value)}
@@ -1302,6 +1368,16 @@ export default function NovelStudioPage() {
             <button onClick={createBranch} className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-slate-800 hover:bg-gray-100">
               + 分支
             </button>
+            {branchId !== 'main' && (
+              <button
+                onClick={deleteBranch}
+                disabled={busy}
+                title="删除当前分支及其独有内容"
+                className="rounded-md border border-red-300 bg-white px-2 py-1 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+              >
+                删除分支
+              </button>
+            )}
             <button
               onClick={() => promptAddChild(null)}
               className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-slate-800 hover:bg-gray-100"
@@ -1503,11 +1579,17 @@ export default function NovelStudioPage() {
                   </marker>
                 </defs>
                 <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
-                  {timeline.chains.map((chain, row) => (
-                    <text key={`row-${row}`} x={12} y={40 + row * (NODE_H + 56) - 8} fontSize={11} fill="#94a3b8">
-                      线 {row + 1} · {chain.length} 节 · 起点「{chain[0].label}」
-                    </text>
-                  ))}
+                  {timeline.chains.map((chain, row) => {
+                    const label = timeline.rowLabels[row]
+                    const tag = label.kind === 'main' ? '主线' : label.kind === 'sub' ? '支线' : '未归线'
+                    const color =
+                      label.kind === 'main' ? TYPE_META.plot.color : label.kind === 'sub' ? TYPE_META.subplot.color : '#94a3b8'
+                    return (
+                      <text key={`row-${row}`} x={12} y={40 + row * (NODE_H + 56) - 8} fontSize={11} fill={color}>
+                        [{tag}] {label.name} · {chain.length} 节
+                      </text>
+                    )
+                  })}
                   {timeline.laid.map((item, index) => {
                     const nextItem = timeline.laid[index + 1]
                     const sameRow = nextItem && nextItem.row === item.row
@@ -1899,6 +1981,12 @@ export default function NovelStudioPage() {
               <div className="mt-2 space-y-1 border-t border-gray-100 pt-2 text-xs text-gray-400">
                 <p>悬停节点点「+」加子节点;拖节点本体改挂父级(拖到空白处提升为顶层);拖底部蓝点到另一节点建立关系;右侧圆圈折叠/展开。</p>
                 <p>类型由输入文本自动判定,可在节点详情中修改。</p>
+                <p>
+                  <span style={{ color: TYPE_META.subplot.color }}>支线</span>
+                  节点用于与主线并行的配角故事线,和主线共存、一起进成稿;顶部的
+                  <span className="text-gray-500">「分支」</span>
+                  则是同一故事的另一个版本(what-if),两者互斥、不会同时出现在成稿里。
+                </p>
               </div>
               <div className="mt-2 border-t border-gray-100 pt-2">
                 <p className="text-xs text-gray-400">节点状态(左侧竖条)</p>

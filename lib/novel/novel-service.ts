@@ -53,7 +53,7 @@ export const NODE_TYPE_VOCAB: Array<{ type: string; name: string }> = [
   { type: 'plot', name: '主线剧情' },
   { type: 'chapter', name: '章节' },
   { type: 'scene', name: '场景' },
-  { type: 'branch_note', name: '分支设定' },
+  { type: 'subplot', name: '支线(与主线并行的配角故事线)' },
   { type: 'outline', name: '大纲' },
   { type: 'intake', name: '未分类素材' }
 ];
@@ -205,8 +205,9 @@ function inferNodeType(text: string): string {
   if (/主线|剧情|冲突|目标|plot|conflict|goal|arc/i.test(text)) {
     return 'plot';
   }
-  if (/分支|支线|if|branch|alternate/i.test(text)) {
-    return 'branch_note';
+  // 支线:与主线并行的配角故事线(注意与「分支」版本功能无关)
+  if (/支线|副线|番外|配角线|subplot|side story|sideplot/i.test(text)) {
+    return 'subplot';
   }
   if (/章节|章|chapter|act/i.test(text)) {
     return 'chapter';
@@ -559,6 +560,16 @@ export class NovelService {
       }),
       branch
     };
+  }
+
+  async deleteBranch(projectId: string, branchId: string): Promise<ToolResult> {
+    const saved = await this.repository.deleteBranch(projectId, branchId);
+    return toolResult({
+      projectId,
+      branchId: saved.fallbackBranchId,
+      revisionId: saved.state.current_revision_id,
+      summary: `已删除分支 ${branchId}(清理 ${saved.removedNodes} 个节点、${saved.removedEdges} 条关系),已切换到 ${saved.fallbackBranchId}。`
+    });
   }
 
   async switchBranch(projectId: string, branchId: string): Promise<ToolResult> {

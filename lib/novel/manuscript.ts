@@ -87,8 +87,11 @@ function buildContext(nodes: Node[], edges: Edge[], drafts: Draft[]): WalkContex
   return { childrenOf, byId, draftByNode };
 }
 
-/** 只有这些类型会作为「章节骨架」输出;角色/世界观等设定不进正文 */
-const NARRATIVE_TYPES = new Set(['chapter', 'scene', 'plot', 'outline']);
+/**
+ * 只有这些类型会作为「章节骨架」输出;角色/世界观等设定不进正文。
+ * subplot(支线)按它在图谱里的挂载位置穿插进正文,不单独归到末尾。
+ */
+const NARRATIVE_TYPES = new Set(['chapter', 'scene', 'plot', 'subplot', 'outline']);
 
 export function exportManuscript(
   state: ProjectState,
