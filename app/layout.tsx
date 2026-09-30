@@ -1,21 +1,12 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import NavMenu from '@/components/NavMenu'
 import './globals.css'
 
 export const metadata: Metadata = {
   title: 'YYDeng // Dev & Builder',
   description: 'Tech notes, project logs, AI exploration',
 }
-
-const navLinks = [
-  { href: '/',        label: '~/home' },
-  { href: '/blog',    label: '~/blog' },
-  { href: '/write',   label: '~/write' },
-  { href: '/support', label: '~/support' },
-  { href: '/checkinWall', label: '~/checkin' },
-  { href: '/novel',   label: '~/novel' },
-  { href: '/about',   label: '~/about' },
-]
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -35,18 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </span>
             </Link>
 
-            <div className="flex items-center gap-1">
-              {navLinks.map(link => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className="px-3 py-1 rounded text-xs no-underline"
-                  style={{ color: 'var(--text-muted)' }}
-                >
-                  {link.label}
-                </Link>
-              ))}
-            </div>
+            <NavMenu />
           </div>
         </nav>
 

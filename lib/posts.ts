@@ -20,6 +20,20 @@ function calcReadingTime(text: string): number {
   return Math.max(1, Math.ceil(words / 200))
 }
 
+function parsePost(slug: string, raw: string): Post {
+  const { data, content } = matter(raw)
+  return {
+    slug,
+    title: data.title ?? slug,
+    date: data.date ?? '',
+    category: data.category ?? 'uncategorized',
+    tags: Array.isArray(data.tags) ? data.tags : [],
+    excerpt: data.excerpt ?? content.replace(/#+\s[^\n]*/g, '').trim().slice(0, 120) + '...',
+    content,
+    readingTime: calcReadingTime(content),
+  }
+}
+
 export function getAllPosts(): Post[] {
   if (!fs.existsSync(postsDir)) return []
   return fs.readdirSync(postsDir)
@@ -27,35 +41,23 @@ export function getAllPosts(): Post[] {
     .map(fileName => {
       const slug = fileName.replace(/\.md$/, '')
       const raw = fs.readFileSync(path.join(postsDir, fileName), 'utf8')
-      const { data, content } = matter(raw)
-      return {
-        slug,
-        title: data.title ?? slug,
-        date: data.date ?? '',
-        category: data.category ?? 'uncategorized',
-        tags: Array.isArray(data.tags) ? data.tags : [],
-        excerpt: data.excerpt ?? content.replace(/#+\s[^\n]*/g, '').trim().slice(0, 120) + '...',
-        content,
-        readingTime: calcReadingTime(content),
+      try {
+        return parsePost(slug, raw)
+      } catch (e) {
+        // 单篇文章 frontmatter 损坏(如 excerpt 里有未转义引号)时跳过该篇,
+        // 不让整站 500。控制台留一条警告方便排查。
+        console.warn(`[posts] 跳过 frontmatter 损坏的文章 ${fileName}:`, e instanceof Error ? e.message.split('\n')[0] : e)
+        return null
       }
     })
+    .filter((p): p is Post => p !== null)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 }
 
 export function getPostBySlug(slug: string): Post | null {
   try {
     const raw = fs.readFileSync(path.join(postsDir, `${slug}.md`), 'utf8')
-    const { data, content } = matter(raw)
-    return {
-      slug,
-      title: data.title ?? slug,
-      date: data.date ?? '',
-      category: data.category ?? 'uncategorized',
-      tags: Array.isArray(data.tags) ? data.tags : [],
-      excerpt: data.excerpt ?? content.slice(0, 120) + '...',
-      content,
-      readingTime: calcReadingTime(content),
-    }
+    return parsePost(slug, raw)
   } catch {
     return null
   }

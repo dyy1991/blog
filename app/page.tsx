@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { getAllPosts, getCategories } from '@/lib/posts'
 import TerminalHero from '@/components/TerminalHero'
+import SideFx from '@/components/SideFx'
 
 export default function Home() {
   const posts = getAllPosts().slice(0, 6)
@@ -9,6 +10,9 @@ export default function Home() {
 
   return (
     <div>
+      {/* 两侧装饰动效(仅宽屏显示,纯装饰) */}
+      <SideFx />
+
       {/* Hero */}
       <TerminalHero />
 

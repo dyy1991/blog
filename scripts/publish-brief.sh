@@ -14,6 +14,13 @@ if [[ ! -f "$TOKEN_FILE" ]]; then
 fi
 TOKEN="$(tr -d '[:space:]' < "$TOKEN_FILE")"
 
+# 发布前校验 frontmatter:坏文件(如 excerpt 里未转义的引号)会让博客整站解析失败,
+# 必须在 commit 之前拦下。校验失败时修复文件后重跑本脚本即可。
+bash "$REPO_ROOT/scripts/validate-posts.sh" || {
+  echo "ERROR: frontmatter 校验未通过,已中止发布(未 commit、未 push)。" >&2
+  exit 1
+}
+
 # 只提交速报文章(先 add 再 pathspec 提交,不影响其他已暂存/未提交的改动)
 if git status --porcelain -- content/posts/ | grep -q .; then
   git add content/posts/

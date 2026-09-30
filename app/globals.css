@@ -114,3 +114,156 @@ body {
 /* hover-color helpers used by nav links */
 .hover-green:hover { color: var(--green) !important; }
 .hover-blue:hover { color: var(--blue) !important; }
+
+/* ══════════════ 导航(NavMenu)══════════════ */
+.nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-decoration: none;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.15s, background 0.15s;
+}
+.nav-link:hover { color: var(--green); }
+.nav-link-active { color: var(--green); background: rgba(0,255,136,0.08); }
+
+.nav-caret {
+  display: inline-block;
+  font-size: 9px;
+  transition: transform 0.15s;
+}
+
+.nav-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 190px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  animation: fadeIn 0.15s ease;
+}
+.nav-dropdown-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+}
+.nav-dropdown-item:hover { background: var(--bg-hover); color: var(--green); }
+.nav-dropdown-item.nav-link-active { color: var(--green); }
+.nav-dropdown-desc { margin-left: auto; font-size: 10px; color: var(--text-dim); }
+
+/* ══════════════ 首页两侧动效(SideFx)══════════════ */
+.sidefx { display: none; }
+
+@media (min-width: 1280px) {
+  .sidefx {
+    display: block;
+    position: fixed;
+    top: 56px;              /* 导航栏下方 */
+    bottom: 0;
+    width: calc((100vw - 66rem) / 2);
+    max-width: 260px;
+    pointer-events: none;   /* 纯装饰,不拦截任何交互 */
+    z-index: 0;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 8%, #000 90%, transparent);
+    mask-image: linear-gradient(to bottom, transparent, #000 8%, #000 90%, transparent);
+  }
+  .sidefx-left  { left: 0; }
+  .sidefx-right { right: 0; }
+}
+
+.sidefx-canvas { width: 100%; height: 100%; opacity: 0.35; }
+
+/* 右侧:CI/CD 流水线 */
+.pipe {
+  position: absolute;
+  top: 12%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 0;
+}
+.pipe-track {
+  position: absolute;
+  left: 5px;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  background: linear-gradient(to bottom, var(--border), rgba(0,255,136,0.3), var(--border));
+}
+.pipe-pulse {
+  position: absolute;
+  left: 2px;
+  top: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 12px rgba(0,255,136,0.9);
+  animation: pipeTravel 6s linear infinite;
+}
+@keyframes pipeTravel {
+  0%   { top: 0;                  opacity: 0; }
+  8%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { top: calc(100% - 8px);   opacity: 0; }
+}
+.pipe-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 0;
+}
+.pipe-dot {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--bg-card);
+  animation: pipeDot 4s ease-in-out infinite;
+}
+@keyframes pipeDot {
+  0%, 100% { border-color: var(--border); box-shadow: none; }
+  50%      { border-color: var(--green);  box-shadow: 0 0 10px rgba(0,255,136,0.6); }
+}
+.pipe-label { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+
+/* 右侧:上浮的 commit hash */
+.fx-hash {
+  position: absolute;
+  bottom: -30px;
+  font-size: 10px;
+  color: rgba(88,166,255,0.5);
+  animation-name: floatUp;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+@keyframes floatUp {
+  0%   { transform: translateY(0);      opacity: 0; }
+  10%  { opacity: 0.7; }
+  90%  { opacity: 0.1; }
+  100% { transform: translateY(-85vh);  opacity: 0; }
+}
+
+/* 减少动态效果偏好:全部静止 */
+@media (prefers-reduced-motion: reduce) {
+  .pipe-pulse, .pipe-dot { animation: none !important; }
+  .fx-hash { display: none; }
+}
