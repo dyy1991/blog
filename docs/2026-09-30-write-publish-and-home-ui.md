@@ -111,3 +111,5 @@
 3. **运行时兜底**:`lib/posts.ts` 单篇解析失败时跳过该篇并 console.warn,一篇坏文章不再带崩整站(本次已修)。
 
 校验器覆盖:首行/闭合 `---`、`title|date|category|excerpt` 的双引号标量(含 `\"` 转义)、`tags` 数组格式、模板外的溢出行;兼容 CRLF。
+
+**2026-10-09 补丁**:中文 slug 文章详情页 404——`/blog/[slug]` 的 `params.slug` 对非 ASCII 是百分号编码的,`getPostBySlug` 前需 `decodeURIComponent`(纯 ASCII 不受影响)。已在容器里以生产构建 + 实际请求中英文 URL 双验证。

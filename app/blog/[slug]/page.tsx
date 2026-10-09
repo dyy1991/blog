@@ -10,7 +10,15 @@ export async function generateStaticParams() {
 }
 
 export default async function PostPage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params
+  const { slug: rawSlug } = await params
+  // 中文等非 ASCII slug 到达时是百分号编码的(%E5%BD%BC...),需解码后才能对上
+  // content/posts/ 下的文件名;纯 ASCII slug 解码是恒等操作,不受影响。
+  let slug = rawSlug
+  try {
+    slug = decodeURIComponent(rawSlug)
+  } catch {
+    /* 畸形编码(如 %zz)保持原样,走 notFound */
+  }
   const post = getPostBySlug(slug)
   if (!post) notFound()
 
